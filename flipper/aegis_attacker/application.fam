@@ -1,0 +1,12 @@
+App(
+    appid="aegis_attacker",
+    name="Aegis Attacker",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="aegis_attacker_app",
+    requires=["gui"],
+    stack_size=2 * 1024,
+    fap_category="GPIO",
+    fap_author="Aegis Edge",
+    fap_version="1.0",
+    fap_description="Sensor-spoof signal injector for the Aegis Edge demo.",
+)
