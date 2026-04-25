@@ -1,0 +1,14 @@
+{
+  "name": "aegis-edge-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AEGIS EDGE defense console — TypeScript frontend (compiles to app.js served by FastAPI).",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -f app.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
