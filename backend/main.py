@@ -6,9 +6,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Set
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+load_dotenv(Path(__file__).parent / ".env")
 
 from anomaly_detector import AnomalyDetector
 from flash_manager import FlashManager
@@ -18,10 +21,10 @@ from serial_reader import SerialReader, SimulatedReader
 # ── Configuration ─────────────────────────────────────────────────────────────
 SIMULATE_SERIAL = os.getenv("SIMULATE_SERIAL", "true").lower() == "true"
 SIMULATE_FLASH = os.getenv("SIMULATE_FLASH", "true").lower() == "true"
-FORCE_FALLBACK_LLM = os.getenv("FORCE_FALLBACK_LLM", "true").lower() == "true"
+FORCE_FALLBACK_LLM = os.getenv("FORCE_FALLBACK_LLM", "false").lower() == "true"
 SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:70b")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
