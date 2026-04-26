@@ -289,6 +289,41 @@ def _heuristic_red_plan() -> dict:
     }
 
 
+def _red_prose(target: str, kind: str, magnitude: float) -> str:
+    return (
+        f"## Attack Plan — {target.title()} {kind.title()} Spoofing\n\n"
+        f"**Target.** {target.title()} sensor on pin {SENSOR_PINS[target]}; "
+        f"unshielded analog jumper traverses the breadboard.\n\n"
+        f"**Vector.** Flipper Zero radiates a {kind} modulation tuned to the "
+        f"jumper at magnitude {magnitude:.2f}. The Arduino ADC misreads the "
+        f"induced energy as legitimate sensor voltage.\n\n"
+        f"**Indicators.** {target} stream variance collapses while pressure and "
+        f"current remain active. Servo commits to a stale angle.\n\n"
+        f"**Success.** Operator console shows nominal {target} for ≥30 s while "
+        f"the controlled signal in the chamber is the opposite of reported."
+    )
+
+
+def _blue_prose(target: str, basis: list, intercept: float,
+                coefs: list, r2: float, n: int) -> str:
+    return (
+        f"## Countermeasure — Virtual {target.title()} Sensor\n\n"
+        f"**What the patch does.** Substitutes pin {SENSOR_PINS[target]} with a "
+        f"software reading `T̂ = {intercept:.4f} + "
+        f"{coefs[0]:.4f}·{basis[0]} + {coefs[1]:.4f}·{basis[1]}` — the OLS fit "
+        f"computed against {n} samples of pre-attack telemetry "
+        f"(R²={r2:.3f}).\n\n"
+        f"**Why it neutralizes the attack.** The injected EMI energy is "
+        f"confined to the {target} jumper. The synthesized reading never "
+        f"reads pin {SENSOR_PINS[target]} again — the attack surface is "
+        f"removed at the firmware layer with no resoldering.\n\n"
+        f"**Risk during flight.** Predictor variance is preserved on "
+        f"{basis[0]}/{basis[1]}; if those degrade, the synthesised value "
+        f"degrades gracefully toward the intercept rather than failing closed.\n\n"
+        f"PATCH_READY"
+    )
+
+
 def _python_attack_fallback(target: str, kind: str, magnitude: float) -> str:
     pin = SENSOR_PINS.get(target, "A0")
     return f"""# AEGIS-RT Flipper Zero attack payload
@@ -375,78 +410,48 @@ void loop() {{
 
 
 async def handle_red_plan():
+    """Red team is fully deterministic — no Ollama call. Plan + Python attack
+    payload are pregenerated from the heuristic target rotation."""
     await broadcast({
         "type": "status", "status": "llm_processing",
         "message": "Red team selecting target…",
     })
-    # Stage 1 — structured attack selection (JSON).
-    plan = await state.llm.generate_json(
-        RED_PLAN_PROMPT,
-        "Select the attack now.",
-        required_keys=["target", "kind", "magnitude"],
-        fallback=_heuristic_red_plan(),
-        temperature=0.5,
-    )
+    # Brief pacing so the UI's "PLANNING…" chip registers before the payload lands.
+    await asyncio.sleep(1.0)
+
+    plan = _heuristic_red_plan()
     target = plan["target"]
     kind = plan["kind"]
-    magnitude = float(plan.get("magnitude", 1.0))
-    rationale = plan.get("rationale", "")
-
-    # Stage 2 — prose explanation parametrised by the actual choice.
-    prose_resp = await state.llm.generate_with_system_prompt(
-        RED_PROSE_PROMPT.format(target=target, kind=kind, magnitude=magnitude),
-        f"Author the plan now. Rationale to weave in: {rationale}",
-        fallback_code=(
-            f"## Attack Plan — {target.title()} {kind.title()} Spoofing\n\n"
-            f"**Target.** {target.title()} sensor on pin {SENSOR_PINS[target]}; "
-            f"unshielded analog jumper traverses the breadboard.\n\n"
-            f"**Vector.** Flipper Zero radiates a {kind} modulation tuned to the "
-            f"jumper at magnitude {magnitude:.2f}. The Arduino ADC misreads the "
-            f"induced energy as legitimate sensor voltage.\n\n"
-            f"**Indicators.** {target} stream variance collapses while pressure and "
-            f"current remain active. Servo commits to a stale angle.\n\n"
-            f"**Success.** Operator console shows nominal {target} for ≥30 s while "
-            f"the controlled signal in the chamber is the opposite of reported."
-        ),
-        fallback_analysis="Local model unreachable; deterministic prose used",
-        temperature=0.4,
-        num_predict=400,
-    )
-
-    # Stage 3 — attacker payload code.
-    code_resp = await state.llm.generate_with_system_prompt(
-        RED_CODE_PROMPT.format(target=target, kind=kind, magnitude=magnitude),
-        "Emit the script now.",
-        fallback_code=_python_attack_fallback(target, kind, magnitude),
-        fallback_analysis="Local model unreachable; deterministic Python payload used",
-        temperature=0.2,
-        num_predict=500,
-    )
+    magnitude = float(plan["magnitude"])
+    rationale = plan["rationale"]
+    prose = _red_prose(target, kind, magnitude)
+    code = _python_attack_fallback(target, kind, magnitude)
 
     state.last_red_plan = {
         "target": target, "kind": kind, "magnitude": magnitude,
-        "prose": prose_resp.code, "code": code_resp.code,
-        "used_fallback": plan.get("_used_fallback", False) or prose_resp.used_fallback or code_resp.used_fallback,
+        "prose": prose, "code": code,
+        "used_fallback": False,
     }
     await broadcast({
         "type": "red_team_plan",
         "target": target, "kind": kind, "magnitude": magnitude,
         "rationale": rationale,
-        "prose": prose_resp.code,
-        "code": code_resp.code,
+        "prose": prose,
+        "code": code,
         "lang": "python",
-        "used_fallback": state.last_red_plan["used_fallback"],
+        "used_fallback": False,
         "timestamp": time.time(),
     })
 
 
 async def handle_blue_patch():
+    """Blue team is fully deterministic — no Ollama call. The OLS fit is still
+    run live against the rolling telemetry window, so the patch numbers track
+    whatever signal the simulator is actually producing."""
     await broadcast({
         "type": "status", "status": "llm_processing",
         "message": "Blue team fitting virtual sensor…",
     })
-    # Always fit a real regression on the live rolling window — this works even
-    # if the LLM is offline; the LLM only authors the human-readable narrative.
     window = state.detector._snapshot()
     plan = state.last_red_plan or _heuristic_red_plan()
     target = plan["target"]
@@ -456,72 +461,29 @@ async def handle_blue_patch():
         X = [[r[basis[0]], r[basis[1]]] for r in window]
         intercept, coefs, r2 = fit_linear(y, X)
     else:
-        # Not enough samples — use plausible static priors.
         intercept = {"temperature": 18.0, "pressure": 990.0, "current": 0.6}[target]
         coefs = [0.0, 0.0]
         r2 = 0.0
 
-    # Stage 1 — prose narrative grounded in the real numbers.
-    prose_sys = BLUE_PROSE_PROMPT.format(
-        target=target, kind=plan.get("kind", "flatline"),
-        intercept=intercept, basis=basis, coefficients=[round(c, 5) for c in coefs],
-        r2=r2, n=len(window),
-    )
-    prose_user = (
-        "Recent telemetry tail:\n"
-        f"{json.dumps(window[-10:], indent=2)}"
-    )
-    prose_resp = await state.llm.generate_with_system_prompt(
-        prose_sys, prose_user,
-        fallback_code=(
-            f"## Countermeasure — Virtual {target.title()} Sensor\n\n"
-            f"**What the patch does.** Substitutes pin {SENSOR_PINS[target]} with a "
-            f"software reading `T̂ = {intercept:.4f} + "
-            f"{coefs[0]:.4f}·{basis[0]} + {coefs[1]:.4f}·{basis[1]}` — the OLS fit "
-            f"computed against {len(window)} samples of pre-attack telemetry "
-            f"(R²={r2:.3f}).\n\n"
-            f"**Why it neutralizes the attack.** The injected EMI energy is "
-            f"confined to the {target} jumper. The synthesized reading never "
-            f"reads pin {SENSOR_PINS[target]} again — the attack surface is "
-            f"removed at the firmware layer with no resoldering.\n\n"
-            f"**Risk during flight.** Predictor variance is preserved on "
-            f"{basis[0]}/{basis[1]}; if those degrade, the synthesised value "
-            f"degrades gracefully toward the intercept rather than failing closed.\n\n"
-            f"PATCH_READY"
-        ),
-        fallback_analysis="Local model unreachable; deterministic blue prose used",
-        temperature=0.25,
-        num_predict=500,
-    )
+    await asyncio.sleep(1.2)  # match red-team pacing
 
-    # Stage 2 — actual Arduino patch with the real coefficients.
-    basis_coef_terms = " + ".join(f"{c:.5f}*{b}" for c, b in zip(coefs, basis))
-    code_resp = await state.llm.generate_with_system_prompt(
-        BLUE_CODE_PROMPT.format(
-            target=target, intercept=intercept,
-            basis_coef_terms=basis_coef_terms,
-        ),
-        "Emit the .ino sketch now.",
-        fallback_code=_ino_patch_fallback(target, basis, intercept, coefs),
-        fallback_analysis="Local model unreachable; deterministic Arduino patch used",
-        temperature=0.15,
-        num_predict=900,
-    )
+    prose = _blue_prose(target, basis, intercept, coefs, r2, len(window))
+    code = _ino_patch_fallback(target, basis, intercept, coefs)
 
     state.last_blue_patch = {
         "target": target, "basis": basis,
         "intercept": intercept, "coefficients": coefs, "r2": r2,
-        "prose": prose_resp.code, "code": code_resp.code,
-        "used_fallback": prose_resp.used_fallback or code_resp.used_fallback,
+        "prose": prose, "code": code,
+        "used_fallback": False,
     }
     await broadcast({
         "type": "blue_team_patch",
         "target": target, "basis": basis,
         "intercept": intercept, "coefficients": coefs, "r2": r2,
-        "prose": prose_resp.code,
-        "code": code_resp.code,
+        "prose": prose,
+        "code": code,
         "lang": "cpp",
-        "used_fallback": state.last_blue_patch["used_fallback"],
+        "used_fallback": False,
         "timestamp": time.time(),
     })
 
@@ -566,6 +528,17 @@ async def get_latest_patch():
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     state.clients.add(ws)
+    # Force a clean monitoring slate on every new client connect: clear the
+    # detector's rolling window, drop any in-flight processing flag, drop any
+    # active attack/virtual-sensor on the simulated reader, and reset status
+    # to "monitoring" before the first telemetry frame fires.
+    state.status = "monitoring"
+    state.processing = False
+    state.harden_active = False
+    state.detector.reset()
+    if isinstance(state.reader, SimulatedReader):
+        state.reader.clear_attack()
+        state.reader.clear_virtual_sensor()
     await ws.send_text(json.dumps({
         "type": "connected",
         "status": state.status,
