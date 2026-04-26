@@ -61,7 +61,7 @@ function makeSpark(canvasId, color, yMin, yMax) {
 const charts = {
     temperature: makeSpark("tempChart", "#00ff9d", 18, 32),
     pressure: makeSpark("pressureChart", "#00d4ff", 990, 1040),
-    current: makeSpark("currentChart", "#b67bff", 0.4, 1.4),
+    current: makeSpark("currentChart", "#b67bff", 0, 1024),
 };
 function pushPoint(sensor, value) {
     const ds = charts[sensor].data.datasets[0];
@@ -79,6 +79,10 @@ const els = {
     tempReading: byId("tempReading"),
     pressureReading: byId("pressureReading"),
     currentReading: byId("currentReading"),
+    humidityReading: byId("humidityReading"),
+    fanReading: byId("fanReading"),
+    alarmReading: byId("alarmReading"),
+    alarmCard: bySelector('.sensor-mini[data-sensor="alarm"]'),
     tempTag: byId("tempTag"),
     pressureTag: byId("pressureTag"),
     currentTag: byId("currentTag"),
@@ -446,7 +450,18 @@ function handleTelemetry(msg) {
     pushPoint("current", sensors.current);
     els.tempReading.innerHTML = `${sensors.temperature.toFixed(2)} <span>°C</span>`;
     els.pressureReading.innerHTML = `${sensors.pressure.toFixed(2)} <span>hPa</span>`;
-    els.currentReading.innerHTML = `${sensors.current.toFixed(3)} <span>A</span>`;
+    els.currentReading.innerHTML = `${Math.round(sensors.current)} <span>lux</span>`;
+    if (sensors.humidity !== undefined) {
+        els.humidityReading.innerHTML = `${sensors.humidity.toFixed(1)} <em>%</em>`;
+    }
+    if (sensors.fan !== undefined) {
+        els.fanReading.innerHTML = `${Math.round(sensors.fan)} <em>pwm</em>`;
+    }
+    if (sensors.alarm !== undefined) {
+        const triggered = sensors.alarm !== 0;
+        els.alarmReading.textContent = triggered ? "ACTIVE" : "CLEAR";
+        els.alarmCard.dataset.state = triggered ? "active" : "";
+    }
     const tempCard = bySelector('.sensor-card[data-sensor="temperature"]');
     tempCard.dataset.flatlined = anomaly ? "true" : "false";
     els.tempTag.textContent = anomaly ? "FLATLINED" : "NOMINAL";

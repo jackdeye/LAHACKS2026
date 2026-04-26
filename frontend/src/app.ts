@@ -33,7 +33,15 @@ type AgentKey = "debugger" | "orchestrator" | "coder" | "verifier";
 type AgentState = "idle" | "active" | "done" | "fail";
 type LinkState = "connecting" | "connected" | "disconnected";
 
-interface Sensors { temperature: number; pressure: number; current: number; }
+interface Sensors {
+  temperature: number;
+  pressure: number;
+  current: number;
+  humidity?: number;
+  light?: number;
+  fan?: number;
+  alarm?: number;
+}
 interface TelemetryStats {
   temp_variance?: number;
   pressure_variance?: number;
@@ -124,7 +132,7 @@ function makeSpark(canvasId: string, color: string, yMin: number, yMax: number):
 const charts: Record<SensorKey, ChartInstance> = {
   temperature: makeSpark("tempChart", "#00ff9d", 18, 32),
   pressure: makeSpark("pressureChart", "#00d4ff", 990, 1040),
-  current: makeSpark("currentChart", "#b67bff", 0.4, 1.4),
+  current: makeSpark("currentChart", "#b67bff", 0, 1024),
 };
 
 function pushPoint(sensor: SensorKey, value: number): void {
@@ -143,6 +151,10 @@ const els = {
   tempReading: byId<HTMLElement>("tempReading"),
   pressureReading: byId<HTMLElement>("pressureReading"),
   currentReading: byId<HTMLElement>("currentReading"),
+  humidityReading: byId<HTMLElement>("humidityReading"),
+  fanReading: byId<HTMLElement>("fanReading"),
+  alarmReading: byId<HTMLElement>("alarmReading"),
+  alarmCard: bySelector<HTMLElement>('.sensor-mini[data-sensor="alarm"]'),
   tempTag: byId<HTMLElement>("tempTag"),
   pressureTag: byId<HTMLElement>("pressureTag"),
   currentTag: byId<HTMLElement>("currentTag"),
@@ -585,7 +597,19 @@ function handleTelemetry(msg: TelemetryMsg): void {
 
   els.tempReading.innerHTML = `${sensors.temperature.toFixed(2)} <span>°C</span>`;
   els.pressureReading.innerHTML = `${sensors.pressure.toFixed(2)} <span>hPa</span>`;
-  els.currentReading.innerHTML = `${sensors.current.toFixed(3)} <span>A</span>`;
+  els.currentReading.innerHTML = `${Math.round(sensors.current)} <span>lux</span>`;
+
+  if (sensors.humidity !== undefined) {
+    els.humidityReading.innerHTML = `${sensors.humidity.toFixed(1)} <em>%</em>`;
+  }
+  if (sensors.fan !== undefined) {
+    els.fanReading.innerHTML = `${Math.round(sensors.fan)} <em>pwm</em>`;
+  }
+  if (sensors.alarm !== undefined) {
+    const triggered = sensors.alarm !== 0;
+    els.alarmReading.textContent = triggered ? "ACTIVE" : "CLEAR";
+    els.alarmCard.dataset.state = triggered ? "active" : "";
+  }
 
   const tempCard = bySelector<HTMLElement>('.sensor-card[data-sensor="temperature"]');
   tempCard.dataset.flatlined = anomaly ? "true" : "false";

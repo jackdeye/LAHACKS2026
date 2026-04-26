@@ -208,6 +208,53 @@ html, body {
 }
 .sensor-spark { height: 36px; position: relative; }
 
+.sensor-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 4px;
+}
+.sensor-mini {
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mini-name {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.mini-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mini-value em {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--text-faint);
+  margin-left: 2px;
+}
+.sensor-mini[data-sensor="alarm"][data-state="active"] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.sensor-mini[data-sensor="alarm"][data-state="active"] .mini-value {
+  color: var(--danger);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
 .conf-mini {
   background: var(--bg-0);
   border: 1px solid var(--line);

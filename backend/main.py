@@ -24,7 +24,13 @@ SIMULATE_FLASH = os.getenv("SIMULATE_FLASH", "true").lower() == "true"
 FORCE_FALLBACK_LLM = os.getenv("FORCE_FALLBACK_LLM", "false").lower() == "true"
 SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:70b")
+# Two-stage local pipeline: analyst reasons, coder synthesises the patch.
+# OLLAMA_MODEL is honoured as a fallback for the analyst slot for backward compat.
+OLLAMA_ANALYSIS_MODEL = os.getenv(
+    "OLLAMA_ANALYSIS_MODEL",
+    os.getenv("OLLAMA_MODEL", "llama3.1:70b"),
+)
+OLLAMA_CODER_MODEL = os.getenv("OLLAMA_CODER_MODEL", "qwen2.5-coder")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 MODELS_DIR = Path(__file__).parent.parent / "arduino" / "Models"
@@ -40,7 +46,12 @@ class SystemState:
         self.clients: Set[WebSocket] = set()
         self.reader = SimulatedReader() if SIMULATE_SERIAL else SerialReader(SERIAL_PORT)
         self.detector = AnomalyDetector()
-        self.llm = LLMClient(base_url=OLLAMA_URL, model=OLLAMA_MODEL, force_fallback=FORCE_FALLBACK_LLM)
+        self.llm = LLMClient(
+            base_url=OLLAMA_URL,
+            analysis_model=OLLAMA_ANALYSIS_MODEL,
+            coder_model=OLLAMA_CODER_MODEL,
+            force_fallback=FORCE_FALLBACK_LLM,
+        )
         self.flash_mgr = FlashManager(port=SERIAL_PORT, simulate=SIMULATE_FLASH)
         self.processing = False
 
@@ -99,6 +110,10 @@ async def telemetry_loop():
                     "temperature": reading.temperature,
                     "pressure": reading.pressure,
                     "current": reading.current,
+                    "humidity": reading.humidity,
+                    "light": reading.light,
+                    "fan": reading.fan,
+                    "alarm": reading.alarm,
                 },
                 "anomaly": result.detected,
                 "anomaly_confidence": result.confidence,
@@ -199,7 +214,8 @@ async def get_status():
         "simulate_flash": SIMULATE_FLASH,
         "force_fallback_llm": FORCE_FALLBACK_LLM,
         "last_patch_time": state.last_patch_time,
-        "ollama_model": OLLAMA_MODEL,
+        "ollama_analysis_model": OLLAMA_ANALYSIS_MODEL,
+        "ollama_coder_model": OLLAMA_CODER_MODEL,
     }
 
 

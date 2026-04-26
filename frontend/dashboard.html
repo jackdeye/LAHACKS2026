@@ -61,11 +61,26 @@
         </div>
         <div class="sensor-card" data-sensor="current">
           <div class="sensor-head">
-            <span class="sensor-name">MOTOR CURRENT</span>
+            <span class="sensor-name">LIGHT</span>
             <span class="sensor-tag" id="currentTag">NOMINAL</span>
           </div>
-          <div class="sensor-reading" id="currentReading">-.--- <span>A</span></div>
+          <div class="sensor-reading" id="currentReading">--- <span>lux</span></div>
           <div class="sensor-spark"><canvas id="currentChart"></canvas></div>
+        </div>
+
+        <div class="sensor-mini-grid">
+          <div class="sensor-mini" data-sensor="humidity">
+            <span class="mini-name">HUMIDITY</span>
+            <span class="mini-value" id="humidityReading">--.- <em>%</em></span>
+          </div>
+          <div class="sensor-mini" data-sensor="fan">
+            <span class="mini-name">FAN</span>
+            <span class="mini-value" id="fanReading">--- <em>pwm</em></span>
+          </div>
+          <div class="sensor-mini" data-sensor="alarm">
+            <span class="mini-name">ALARM</span>
+            <span class="mini-value" id="alarmReading">—</span>
+          </div>
         </div>
       </div>
 
