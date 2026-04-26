@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AEGIS EDGE — Agent Mesh</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="brand-mark">▲</div>
+      <div class="brand-text">
+        <div class="brand-title">AEGIS EDGE</div>
+        <div class="brand-sub">Autonomous Agent Mesh · Air-Gapped SOC</div>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <div class="meta-item"><span class="meta-label">SYSTEM</span><span class="meta-value" id="systemStatus">MONITORING</span></div>
+      <div class="meta-item"><span class="meta-label">INCIDENTS</span><span class="meta-value" id="anomalyCount">0</span></div>
+      <div class="meta-item"><span class="meta-label">LINK</span><span class="meta-value link-status" id="linkStatus">CONNECTING</span></div>
+      <div class="meta-item"><span class="meta-label">UTC</span><span class="meta-value" id="clock">--:--:--</span></div>
+    </div>
+  </header>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">SENSORS</div>
+        <div class="sensor-card" data-sensor="temperature">
+          <div class="sensor-head">
+            <span class="sensor-name">TEMPERATURE</span>
+            <span class="sensor-tag" id="tempTag">NOMINAL</span>
+          </div>
+          <div class="sensor-reading" id="tempReading">--.- <span>°C</span></div>
+          <div class="sensor-spark"><canvas id="tempChart"></canvas></div>
+        </div>
+        <div class="sensor-card" data-sensor="pressure">
+          <div class="sensor-head">
+            <span class="sensor-name">PRESSURE</span>
+            <span class="sensor-tag" id="pressureTag">NOMINAL</span>
+          </div>
+          <div class="sensor-reading" id="pressureReading">---.- <span>hPa</span></div>
+          <div class="sensor-spark"><canvas id="pressureChart"></canvas></div>
+        </div>
+        <div class="sensor-card" data-sensor="current">
+          <div class="sensor-head">
+            <span class="sensor-name">MOTOR CURRENT</span>
+            <span class="sensor-tag" id="currentTag">NOMINAL</span>
+          </div>
+          <div class="sensor-reading" id="currentReading">-.--- <span>A</span></div>
+          <div class="sensor-spark"><canvas id="currentChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">CONFIDENCE</div>
+        <div class="conf-mini">
+          <div class="conf-bar"><div class="conf-fill" id="confFill"></div></div>
+          <div class="conf-value" id="confValue">0%</div>
+        </div>
+      </div>
+
+      <div class="sidebar-section sidebar-foot">
+        <div class="sidebar-title">SIMULATION</div>
+        <button class="btn btn-attack" id="btnAttack">⚡ TRIGGER EMI ATTACK</button>
+        <button class="btn btn-clear" id="btnClear">↻ CLEAR ATTACK</button>
+        <div class="mode-badge" id="modeBadge">SIMULATION</div>
+      </div>
+    </aside>
+
+    <main class="canvas">
+      <section class="twin-panel" id="twinPanel">
+        <div class="twin-head">
+          <button class="twin-collapse" id="twinCollapse" aria-label="Toggle digital twin">
+            <span class="chevron"></span>
+          </button>
+          <span class="twin-title">DIGITAL TWIN</span>
+          <span class="twin-sub">Live circuit · drag to orbit · scroll to zoom</span>
+          <span class="twin-tag" id="twinTag">LOADING…</span>
+        </div>
+        <div class="twin-canvas-wrap">
+          <canvas id="twinCanvas"></canvas>
+        </div>
+      </section>
+
+      <aside class="incident-panel" id="incidentPanel" data-open="false">
+        <div class="incident-head">
+          <div class="incident-title">
+            <span class="incident-dot"></span>
+            <span>Incident Response</span>
+          </div>
+          <button class="incident-close" id="incidentClose" aria-label="Close incident panel">×</button>
+        </div>
+
+        <div class="incident-graph-wrap">
+          <svg class="incident-graph" id="agentGraph" viewBox="0 0 340 460" preserveAspectRatio="xMidYMid meet">
+            <g id="graphViewport">
+              <g class="graph-edges" id="graphEdges"></g>
+              <g class="graph-nodes" id="graphNodes"></g>
+            </g>
+          </svg>
+          <button class="graph-recenter" id="graphRecenter" type="button" aria-label="Recenter graph">⌖</button>
+        </div>
+
+        <div class="incident-detail" id="incidentDetail">
+          <div class="detail-head">
+            <div class="detail-title">
+              <span class="detail-dot" id="detailDot"></span>
+              <span id="detailName">No agent selected</span>
+            </div>
+            <span class="detail-tag" id="detailTag">—</span>
+          </div>
+          <div class="detail-body" id="detailBody">
+            <div class="detail-placeholder">Click a spawned agent to inspect its output.</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

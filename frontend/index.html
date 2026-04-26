@@ -3,137 +3,167 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AEGIS EDGE — Agent Mesh</title>
+  <title>AEGIS EDGE — Device Mesh</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="landing.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
-    }
-  }
-  </script>
 </head>
-<body>
-  <header class="topbar">
-    <div class="brand">
-      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
-        <span></span><span></span><span></span>
-      </button>
+<body class="landing">
+  <section class="mesh-view" aria-label="Monitored medical devices">
+    <div class="mesh-header">
       <div class="brand-mark">▲</div>
-      <div class="brand-text">
-        <div class="brand-title">AEGIS EDGE</div>
-        <div class="brand-sub">Autonomous Agent Mesh · Air-Gapped SOC</div>
+      <div class="mesh-header-text">
+        <div class="mesh-header-title">AEGIS EDGE</div>
+        <div class="mesh-header-sub">Device Mesh · select a target to inspect</div>
       </div>
     </div>
-    <div class="topbar-meta">
-      <div class="meta-item"><span class="meta-label">SYSTEM</span><span class="meta-value" id="systemStatus">MONITORING</span></div>
-      <div class="meta-item"><span class="meta-label">INCIDENTS</span><span class="meta-value" id="anomalyCount">0</span></div>
-      <div class="meta-item"><span class="meta-label">LINK</span><span class="meta-value link-status" id="linkStatus">CONNECTING</span></div>
-      <div class="meta-item"><span class="meta-label">UTC</span><span class="meta-value" id="clock">--:--:--</span></div>
+
+    <div class="mesh-legend" aria-hidden="true">
+      <div class="legend-item"><span class="legend-swatch" style="background:#4a8f7e"></span>Respiratory</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#cb912f"></span>Cardiac</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#337ea9"></span>Fluid Delivery</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#6940a5"></span>Surgical</div>
     </div>
-  </header>
 
-  <div class="layout" id="layout">
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-section">
-        <div class="sidebar-title">SENSORS</div>
-        <div class="sensor-card" data-sensor="temperature">
-          <div class="sensor-head">
-            <span class="sensor-name">TEMPERATURE</span>
-            <span class="sensor-tag" id="tempTag">NOMINAL</span>
-          </div>
-          <div class="sensor-reading" id="tempReading">--.- <span>°C</span></div>
-          <div class="sensor-spark"><canvas id="tempChart"></canvas></div>
-        </div>
-        <div class="sensor-card" data-sensor="pressure">
-          <div class="sensor-head">
-            <span class="sensor-name">PRESSURE</span>
-            <span class="sensor-tag" id="pressureTag">NOMINAL</span>
-          </div>
-          <div class="sensor-reading" id="pressureReading">---.- <span>hPa</span></div>
-          <div class="sensor-spark"><canvas id="pressureChart"></canvas></div>
-        </div>
-        <div class="sensor-card" data-sensor="current">
-          <div class="sensor-head">
-            <span class="sensor-name">MOTOR CURRENT</span>
-            <span class="sensor-tag" id="currentTag">NOMINAL</span>
-          </div>
-          <div class="sensor-reading" id="currentReading">-.--- <span>A</span></div>
-          <div class="sensor-spark"><canvas id="currentChart"></canvas></div>
-        </div>
-      </div>
+    <div class="glow-layer" aria-hidden="true">
+      <div class="glow-orb o1"></div>
+      <div class="glow-orb o2"></div>
+      <div class="glow-orb o3"></div>
+      <div class="glow-orb o4"></div>
+      <div class="glow-orb o5"></div>
+    </div>
 
-      <div class="sidebar-section">
-        <div class="sidebar-title">CONFIDENCE</div>
-        <div class="conf-mini">
-          <div class="conf-bar"><div class="conf-fill" id="confFill"></div></div>
-          <div class="conf-value" id="confValue">0%</div>
-        </div>
-      </div>
+    <svg id="meshEdges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div id="meshNodes"></div>
+  </section>
 
-      <div class="sidebar-section sidebar-foot">
-        <div class="sidebar-title">SIMULATION</div>
-        <button class="btn btn-attack" id="btnAttack">⚡ TRIGGER EMI ATTACK</button>
-        <button class="btn btn-clear" id="btnClear">↻ CLEAR ATTACK</button>
-        <div class="mode-badge" id="modeBadge">SIMULATION</div>
-      </div>
-    </aside>
-
-    <main class="canvas">
-      <section class="twin-panel" id="twinPanel">
-        <div class="twin-head">
-          <button class="twin-collapse" id="twinCollapse" aria-label="Toggle digital twin">
-            <span class="chevron"></span>
-          </button>
-          <span class="twin-title">DIGITAL TWIN</span>
-          <span class="twin-sub">Live circuit · drag to orbit · scroll to zoom</span>
-          <span class="twin-tag" id="twinTag">LOADING…</span>
-        </div>
-        <div class="twin-canvas-wrap">
-          <canvas id="twinCanvas"></canvas>
-        </div>
-      </section>
-
-      <aside class="incident-panel" id="incidentPanel" data-open="false">
-        <div class="incident-head">
-          <div class="incident-title">
-            <span class="incident-dot"></span>
-            <span>Incident Response</span>
-          </div>
-          <button class="incident-close" id="incidentClose" aria-label="Close incident panel">×</button>
-        </div>
-
-        <div class="incident-graph-wrap">
-          <svg class="incident-graph" id="agentGraph" viewBox="0 0 340 460" preserveAspectRatio="xMidYMid meet">
-            <g id="graphViewport">
-              <g class="graph-edges" id="graphEdges"></g>
-              <g class="graph-nodes" id="graphNodes"></g>
-            </g>
-          </svg>
-          <button class="graph-recenter" id="graphRecenter" type="button" aria-label="Recenter graph">⌖</button>
-        </div>
-
-        <div class="incident-detail" id="incidentDetail">
-          <div class="detail-head">
-            <div class="detail-title">
-              <span class="detail-dot" id="detailDot"></span>
-              <span id="detailName">No agent selected</span>
-            </div>
-            <span class="detail-tag" id="detailTag">—</span>
-          </div>
-          <div class="detail-body" id="detailBody">
-            <div class="detail-placeholder">Click a spawned agent to inspect its output.</div>
-          </div>
-        </div>
-      </aside>
-    </main>
+  <div class="frontpage" id="frontpage">
+    <div class="frontpage-inner">
+      <div class="frontpage-mark">▲</div>
+      <h1 class="frontpage-title">AEGIS EDGE</h1>
+      <p class="frontpage-tag">Autonomous Agent Mesh · Air-Gapped SOC</p>
+      <p class="frontpage-blurb">
+        Zero-trust autonomous triage for networked medical hardware. Localized
+        frontier intelligence detects sensor tampering and patches embedded
+        firmware in real time — without ever leaving the device.
+      </p>
+      <button id="getStarted" class="btn-primary" type="button">Get Started →</button>
+    </div>
   </div>
 
-  <script type="module" src="app.js"></script>
+  <script>
+    // Group → stroke colour (matches landing.css legend swatches and style.css tokens)
+    const GROUP_COLORS = {
+      respiratory: "#4a8f7e",
+      cardiac:     "#cb912f",
+      fluid:       "#337ea9",
+      surgical:    "#6940a5",
+    };
+
+    // x/y are percentages (SVG viewBox is 0..100 with preserveAspectRatio=none)
+    const DEVICES = [
+      { id: "ventilator",  name: "Ventilator",       group: "respiratory", status: "monitoring", state: "ok",   x: 50, y: 50, href: "/dashboard.html", featured: true,  meta: "ICU-04 · live telemetry" },
+      { id: "bipap",       name: "BiPAP Unit",       group: "respiratory", status: "online",     state: "ok",   x: 22, y: 30,                                          meta: "ICU-02 · 18 cmH₂O" },
+      { id: "ecg",         name: "ECG Monitor",      group: "cardiac",     status: "online",     state: "ok",   x: 78, y: 22,                                          meta: "Bay 7 · 72 bpm" },
+      { id: "defib",       name: "Defibrillator",    group: "cardiac",     status: "online",     state: "ok",   x: 88, y: 48,                                          meta: "Crash cart · armed" },
+      { id: "patient_mon", name: "Patient Monitor",  group: "cardiac",     status: "online",     state: "ok",   x: 70, y: 68,                                          meta: "Bay 7 · SpO₂ 98%" },
+      { id: "infusion",    name: "Infusion Pump",    group: "fluid",       status: "fault",      state: "fault",x: 30, y: 78,                                          meta: "Line 3 · occlusion" },
+      { id: "dialysis",    name: "Dialysis Machine", group: "fluid",       status: "online",     state: "ok",   x: 12, y: 62,                                          meta: "Station 2 · 250 mL/min" },
+      { id: "robot",       name: "Surgical Robot",   group: "surgical",    status: "warn",       state: "warn", x: 50, y: 12,                                          meta: "OR-1 · standby" },
+    ];
+
+    // Cross-group "telemetry backbone" edges so the mesh feels connected.
+    const BACKBONE_EDGES = [
+      ["ventilator", "patient_mon"],
+      ["ventilator", "bipap"],
+      ["patient_mon", "ecg"],
+    ];
+
+    const STATUS_LABEL = {
+      monitoring: "MONITORING",
+      online:     "ONLINE",
+      warn:       "WARN",
+      fault:      "FAULT",
+    };
+    const STATUS_TO_STATE = {
+      monitoring: "ok",
+      online:     "ok",
+      warn:       "warn",
+      fault:      "fault",
+    };
+
+    const nodesEl = document.getElementById("meshNodes");
+    const edgesEl = document.getElementById("meshEdges");
+    const SVG_NS = "http://www.w3.org/2000/svg";
+
+    // Render edges first so they sit visually behind the cards.
+    const byId = Object.fromEntries(DEVICES.map((d) => [d.id, d]));
+    const drawnEdges = new Set();
+    function addEdge(a, b, group, flow) {
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (drawnEdges.has(key)) return;
+      drawnEdges.add(key);
+      const da = byId[a], db = byId[b];
+      if (!da || !db) return;
+      const line = document.createElementNS(SVG_NS, "line");
+      line.setAttribute("x1", da.x);
+      line.setAttribute("y1", da.y);
+      line.setAttribute("x2", db.x);
+      line.setAttribute("y2", db.y);
+      line.setAttribute("stroke", GROUP_COLORS[group] || "#999");
+      if (flow) line.setAttribute("data-flow", "true");
+      edgesEl.appendChild(line);
+    }
+    // Intra-group edges: complete graph within each group.
+    const groups = {};
+    for (const d of DEVICES) (groups[d.group] ||= []).push(d.id);
+    for (const [g, ids] of Object.entries(groups)) {
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          addEdge(ids[i], ids[j], g, true);
+        }
+      }
+    }
+    // Backbone edges (use the first device's group colour for tint).
+    for (const [a, b] of BACKBONE_EDGES) {
+      const g = byId[a]?.group || "respiratory";
+      addEdge(a, b, g, false);
+    }
+
+    // Render device cards.
+    for (const d of DEVICES) {
+      const interactive = Boolean(d.href);
+      const Tag = interactive ? "a" : "div";
+      const el = document.createElement(Tag);
+      el.className = "device-card";
+      el.style.left = d.x + "%";
+      el.style.top  = d.y + "%";
+      el.dataset.interactive = String(interactive);
+      el.dataset.status = STATUS_TO_STATE[d.status] || d.state || "ok";
+      if (d.featured) el.dataset.featured = "true";
+      if (interactive) el.setAttribute("href", d.href);
+
+      const groupLabel = d.group.charAt(0).toUpperCase() + d.group.slice(1);
+      const statusState = STATUS_TO_STATE[d.status] || "ok";
+      el.innerHTML = `
+        <div class="device-head">
+          <div>
+            <div class="device-name">${d.name}</div>
+            <div class="device-group">${groupLabel}</div>
+          </div>
+          <span class="device-status" data-state="${statusState}">${STATUS_LABEL[d.status] || d.status.toUpperCase()}</span>
+        </div>
+        <div class="device-meta"><span class="dot"></span>${d.meta || ""}</div>
+      `;
+      nodesEl.appendChild(el);
+    }
+
+    // Frontpage reveal
+    document.getElementById("getStarted").addEventListener("click", () => {
+      document.body.classList.add("revealed");
+    });
+  </script>
 </body>
 </html>
