@@ -27,6 +27,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:70b")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+MODELS_DIR = Path(__file__).parent.parent / "arduino" / "Models"
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
@@ -254,6 +255,10 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         state.clients.discard(ws)
 
+
+# ── Static models (mounted before frontend catch-all) ────────────────────────
+if MODELS_DIR.exists():
+    app.mount("/models", StaticFiles(directory=str(MODELS_DIR)), name="models")
 
 # ── Static frontend (mounted last so /api and /ws win) ────────────────────────
 if FRONTEND_DIR.exists():

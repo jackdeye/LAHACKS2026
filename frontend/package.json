@@ -9,6 +9,8 @@
     "clean": "rm -f app.js"
   },
   "devDependencies": {
+    "@types/three": "^0.184.0",
+    "three": "^0.184.0",
     "typescript": "^5.4.0"
   }
 }

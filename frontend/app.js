@@ -1,9 +1,9 @@
-"use strict";
 // AEGIS EDGE — Agent Mesh Frontend
 //
 // Connects to the FastAPI backend over WebSocket and translates pipeline
 // events into agent-graph state transitions. Each backend status maps to one
 // of four conceptual agents shown as nodes in the canvas.
+import { initScene } from "./scene3d.js";
 const WS_URL = (() => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const host = location.host || "localhost:8000";
@@ -89,11 +89,17 @@ const els = {
     btnClear: byId("btnClear"),
     sidebarToggle: byId("sidebarToggle"),
     layout: byId("layout"),
-    detail: byId("detail"),
     detailBody: byId("detailBody"),
     detailName: byId("detailName"),
     detailTag: byId("detailTag"),
     detailDot: byId("detailDot"),
+    incidentPanel: byId("incidentPanel"),
+    incidentClose: byId("incidentClose"),
+    agentGraph: document.getElementById("agentGraph"),
+    graphViewport: document.getElementById("graphViewport"),
+    graphRecenter: byId("graphRecenter"),
+    graphEdges: document.getElementById("graphEdges"),
+    graphNodes: document.getElementById("graphNodes"),
 };
 // ── Sidebar collapse ──────────────────────────────────────────────────────
 els.sidebarToggle.addEventListener("click", () => {
@@ -105,42 +111,215 @@ const agents = {
     coder: { state: "idle", status: "IDLE", color: "accent", payload: null },
     verifier: { state: "idle", status: "IDLE", color: "warn", payload: null },
 };
-function agentEl(key) {
-    return bySelector(`.agent[data-agent="${key}"]`);
+// ── Obsidian-style spawn graph ────────────────────────────────────────────
+const SVG_NS = "http://www.w3.org/2000/svg";
+const NODE_LAYOUT = {
+    debugger: { key: "debugger", x: 165, y: 70, parent: null, label: "Debugger", role: "reads sensor logs" },
+    orchestrator: { key: "orchestrator", x: 210, y: 175, parent: "debugger", label: "Orchestrator", role: "plans response" },
+    coder: { key: "coder", x: 130, y: 285, parent: "orchestrator", label: "Coding Agent", role: "synthesises patch" },
+    verifier: { key: "verifier", x: 195, y: 395, parent: "coder", label: "Verifier", role: "compiles & flashes" },
+};
+const NODE_RADIUS = 22;
+const spawnedAgents = new Set();
+// ── Pan / zoom for the agent graph (Obsidian-style navigation) ────────────
+let panX = 0;
+let panY = 0;
+let zoom = 1;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 3.5;
+const DRAG_THRESHOLD = 4; // px in viewBox space before a click becomes a drag
+let isPanning = false;
+let suppressNextClick = false;
+let dragStart = null;
+let panStart = null;
+let dragMoved = false;
+function applyViewport() {
+    els.graphViewport.setAttribute("transform", `translate(${panX} ${panY}) scale(${zoom})`);
 }
-function edgeEl(key) {
-    return bySelector(`.edge[data-edge="${key}"]`);
+function svgPoint(clientX, clientY) {
+    const ctm = els.agentGraph.getScreenCTM();
+    if (!ctm)
+        return { x: clientX, y: clientY };
+    const inv = ctm.inverse();
+    return {
+        x: clientX * inv.a + clientY * inv.c + inv.e,
+        y: clientX * inv.b + clientY * inv.d + inv.f,
+    };
+}
+function resetViewport() {
+    panX = 0;
+    panY = 0;
+    zoom = 1;
+    applyViewport();
+}
+els.agentGraph.addEventListener("mousedown", (e) => {
+    if (e.button !== 0)
+        return;
+    isPanning = true;
+    dragMoved = false;
+    dragStart = svgPoint(e.clientX, e.clientY);
+    panStart = { x: panX, y: panY };
+    els.agentGraph.classList.add("is-panning");
+});
+window.addEventListener("mousemove", (e) => {
+    if (!isPanning || !dragStart || !panStart)
+        return;
+    const cur = svgPoint(e.clientX, e.clientY);
+    const dx = cur.x - dragStart.x;
+    const dy = cur.y - dragStart.y;
+    if (!dragMoved && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+        dragMoved = true;
+    }
+    panX = panStart.x + dx;
+    panY = panStart.y + dy;
+    applyViewport();
+});
+function endPan() {
+    if (!isPanning)
+        return;
+    isPanning = false;
+    els.agentGraph.classList.remove("is-panning");
+    if (dragMoved) {
+        suppressNextClick = true;
+        // clear after the click event has had a chance to fire
+        setTimeout(() => { suppressNextClick = false; }, 0);
+    }
+    dragStart = null;
+    panStart = null;
+}
+window.addEventListener("mouseup", endPan);
+window.addEventListener("mouseleave", endPan);
+els.agentGraph.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const cur = svgPoint(e.clientX, e.clientY);
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+    if (newZoom === zoom)
+        return;
+    // anchor the zoom on the cursor: keep the local point under the cursor fixed
+    const localX = (cur.x - panX) / zoom;
+    const localY = (cur.y - panY) / zoom;
+    panX = cur.x - localX * newZoom;
+    panY = cur.y - localY * newZoom;
+    zoom = newZoom;
+    applyViewport();
+}, { passive: false });
+els.graphRecenter.addEventListener("click", (e) => {
+    e.stopPropagation();
+    resetViewport();
+});
+applyViewport();
+function spawnAgent(key) {
+    if (spawnedAgents.has(key))
+        return;
+    spawnedAgents.add(key);
+    const layout = NODE_LAYOUT[key];
+    // 1. Draw the edge from parent first (under the nodes)
+    if (layout.parent) {
+        const p = NODE_LAYOUT[layout.parent];
+        const path = document.createElementNS(SVG_NS, "path");
+        path.classList.add("graph-edge");
+        path.setAttribute("data-edge-to", key);
+        // gentle bezier — control point shifts horizontally for organic feel
+        const dx = (layout.x - p.x);
+        const cx1 = p.x + dx * 0.25;
+        const cy1 = p.y + (layout.y - p.y) * 0.5;
+        const cx2 = p.x + dx * 0.75;
+        const cy2 = p.y + (layout.y - p.y) * 0.5;
+        // Trim endpoints so the path stops at the node circles, not their centers
+        const angle = Math.atan2(layout.y - p.y, layout.x - p.x);
+        const sx = p.x + Math.cos(angle) * NODE_RADIUS;
+        const sy = p.y + Math.sin(angle) * NODE_RADIUS;
+        const ex = layout.x - Math.cos(angle) * NODE_RADIUS;
+        const ey = layout.y - Math.sin(angle) * NODE_RADIUS;
+        path.setAttribute("d", `M ${sx} ${sy} C ${cx1} ${cy1} ${cx2} ${cy2} ${ex} ${ey}`);
+        els.graphEdges.appendChild(path);
+        // Animate stroke draw-in
+        const length = path.getTotalLength();
+        path.setAttribute("stroke-dasharray", String(length));
+        path.setAttribute("stroke-dashoffset", String(length));
+        requestAnimationFrame(() => {
+            path.setAttribute("stroke-dashoffset", "0");
+        });
+    }
+    // 2. Build the node group. Outer <g> holds the SVG translate (positional),
+    // inner <g class="graph-node-anim"> handles the CSS scale animation —
+    // separating the two avoids CSS transforms clobbering the SVG translate.
+    const g = document.createElementNS(SVG_NS, "g");
+    g.classList.add("graph-node");
+    g.setAttribute("data-agent", key);
+    g.setAttribute("data-state", "idle");
+    g.setAttribute("data-spawned", "false");
+    g.setAttribute("transform", `translate(${layout.x} ${layout.y})`);
+    const anim = document.createElementNS(SVG_NS, "g");
+    anim.classList.add("graph-node-anim");
+    g.appendChild(anim);
+    const halo = document.createElementNS(SVG_NS, "circle");
+    halo.classList.add("node-halo");
+    halo.setAttribute("r", String(NODE_RADIUS + 2));
+    anim.appendChild(halo);
+    const bg = document.createElementNS(SVG_NS, "circle");
+    bg.classList.add("node-bg");
+    bg.setAttribute("r", String(NODE_RADIUS));
+    anim.appendChild(bg);
+    const label = document.createElementNS(SVG_NS, "text");
+    label.classList.add("node-label");
+    label.setAttribute("y", String(NODE_RADIUS + 16));
+    label.textContent = layout.label;
+    anim.appendChild(label);
+    const role = document.createElementNS(SVG_NS, "text");
+    role.classList.add("node-role");
+    role.setAttribute("y", String(NODE_RADIUS + 30));
+    role.textContent = layout.role;
+    anim.appendChild(role);
+    g.addEventListener("click", (ev) => {
+        if (suppressNextClick) {
+            ev.stopPropagation();
+            return;
+        }
+        selectAgent(key);
+    });
+    els.graphNodes.appendChild(g);
+    // trigger spawn animation on next frame
+    requestAnimationFrame(() => g.setAttribute("data-spawned", "true"));
+}
+function nodeEl(key) {
+    return els.graphNodes.querySelector(`[data-agent="${key}"]`);
 }
 function setAgent(key, state, status) {
     agents[key].state = state;
     if (status)
         agents[key].status = status;
-    const el = agentEl(key);
-    el.dataset.state = state;
-    const statusEl = el.querySelector(".agent-status");
-    if (statusEl)
-        statusEl.textContent = agents[key].status;
+    const el = nodeEl(key);
+    if (el)
+        el.setAttribute("data-state", state);
     if (state === "active")
         selectAgent(key);
     else if (selectedAgent === key)
         renderDetail(key);
 }
-function setEdge(key, mode) {
-    const e = edgeEl(key);
-    e.dataset.active = mode === "active" ? "true" : "false";
-    e.dataset.done = mode === "done" ? "true" : "false";
+function clearGraph() {
+    spawnedAgents.clear();
+    els.graphEdges.innerHTML = "";
+    els.graphNodes.innerHTML = "";
+    resetViewport();
 }
+function openIncidentPanel() {
+    els.incidentPanel.dataset.open = "true";
+}
+function closeIncidentPanel() {
+    els.incidentPanel.dataset.open = "false";
+}
+els.incidentClose.addEventListener("click", () => {
+    closeIncidentPanel();
+    resetAll();
+});
 function resetAll() {
-    setAgent("debugger", "idle", "MONITORING");
-    setAgent("orchestrator", "idle", "IDLE");
-    setAgent("coder", "idle", "IDLE");
-    setAgent("verifier", "idle", "IDLE");
-    for (const k of ["d-o", "o-c", "c-v"])
-        setEdge(k, "idle");
-    agents.debugger.payload = null;
-    agents.orchestrator.payload = null;
-    agents.coder.payload = null;
-    agents.verifier.payload = null;
+    agents.debugger = { state: "idle", status: "MONITORING", color: "cyan", payload: null };
+    agents.orchestrator = { state: "idle", status: "IDLE", color: "violet", payload: null };
+    agents.coder = { state: "idle", status: "IDLE", color: "accent", payload: null };
+    agents.verifier = { state: "idle", status: "IDLE", color: "warn", payload: null };
+    clearGraph();
     selectAgent(null);
 }
 // ── Detail panel ──────────────────────────────────────────────────────────
@@ -153,8 +332,8 @@ const AGENT_NAMES = {
 };
 function selectAgent(key) {
     selectedAgent = key;
-    document.querySelectorAll(".agent").forEach((a) => {
-        a.classList.toggle("selected", a.dataset.agent === key);
+    els.graphNodes.querySelectorAll(".graph-node").forEach((n) => {
+        n.classList.toggle("selected", n.getAttribute("data-agent") === key);
     });
     renderDetail(key);
 }
@@ -249,14 +428,7 @@ function typeCode(target, code) {
     }
     step();
 }
-// Click-to-inspect
-document.querySelectorAll(".agent").forEach((el) => {
-    el.addEventListener("click", () => {
-        const key = el.dataset.agent;
-        if (key)
-            selectAgent(key);
-    });
-});
+// (Click-to-inspect is wired per-node when each agent is spawned.)
 // ── System status header + reset ──────────────────────────────────────────
 function setSystemStatus(status) {
     els.systemStatus.textContent = status.toUpperCase().replace(/_/g, " ");
@@ -279,6 +451,10 @@ function handleTelemetry(msg) {
     tempCard.dataset.flatlined = anomaly ? "true" : "false";
     els.tempTag.textContent = anomaly ? "FLATLINED" : "NOMINAL";
     els.tempTag.dataset.state = anomaly ? "anomaly" : "";
+    // --- NEW: Sync the 3D twin with the anomaly state! ---
+    if (sceneApi) {
+        sceneApi.setSensorFailure("dht11", anomaly);
+    }
     // Keep the debugger payload up to date so clicking it shows live stats
     if (stats && agents.debugger.state !== "active") {
         agents.debugger.payload = {
@@ -302,6 +478,12 @@ function handleTelemetry(msg) {
 // ── Anomaly pipeline ──────────────────────────────────────────────────────
 function handleAnomaly(msg) {
     setSystemStatus("anomaly_detected");
+    // Each anomaly event begins a fresh incident — clear any stale agents that
+    // were left over because the user dismissed the previous panel manually
+    // (CLEAR ATTACK / X) before the backend's pipeline reached `monitoring`.
+    clearGraph();
+    openIncidentPanel();
+    spawnAgent("debugger");
     setAgent("debugger", "active", "ANALYSING");
     agents.debugger.payload = {
         kind: "prose",
@@ -317,35 +499,43 @@ function handleStatus(msg) {
     switch (msg.status) {
         case "monitoring":
             resetAll();
+            closeIncidentPanel();
             break;
         case "anomaly_detected":
+            openIncidentPanel();
+            spawnAgent("debugger");
             setAgent("debugger", "active", "ANALYSING");
             break;
         case "llm_processing":
             setAgent("debugger", "done", "REPORTED");
-            setEdge("d-o", "active");
-            setAgent("orchestrator", "active", "REASONING");
-            agents.orchestrator.payload = {
-                kind: "prose",
-                title: "Orchestrator",
-                meta: "dispatching to air-gapped intelligence layer",
-                text: msg.message ?? "Routing telemetry window to the inference layer and planning a remediation strategy…",
-            };
-            if (selectedAgent === "orchestrator")
-                renderDetail("orchestrator");
+            // small stagger so the edge draws after the parent has settled
+            setTimeout(() => {
+                spawnAgent("orchestrator");
+                setAgent("orchestrator", "active", "REASONING");
+                agents.orchestrator.payload = {
+                    kind: "prose",
+                    title: "Orchestrator",
+                    meta: "dispatching to air-gapped intelligence layer",
+                    text: msg.message ?? "Routing telemetry window to the inference layer and planning a remediation strategy…",
+                };
+                if (selectedAgent === "orchestrator")
+                    renderDetail("orchestrator");
+            }, 250);
             break;
         case "flashing":
             setAgent("coder", "done", "PATCH READY");
-            setEdge("c-v", "active");
-            setAgent("verifier", "active", "FLASHING");
-            agents.verifier.payload = {
-                kind: "prose",
-                title: "Verifier",
-                meta: "compiling firmware patch",
-                text: msg.message ?? "Compiling and flashing the synthesised virtual-sensor patch onto the target MCU…",
-            };
-            if (selectedAgent === "verifier")
-                renderDetail("verifier");
+            setTimeout(() => {
+                spawnAgent("verifier");
+                setAgent("verifier", "active", "FLASHING");
+                agents.verifier.payload = {
+                    kind: "prose",
+                    title: "Verifier",
+                    meta: "compiling firmware patch",
+                    text: msg.message ?? "Compiling and flashing the synthesised virtual-sensor patch onto the target MCU…",
+                };
+                if (selectedAgent === "verifier")
+                    renderDetail("verifier");
+            }, 250);
             break;
         case "patched":
             setAgent("verifier", "done", "VERIFIED");
@@ -354,23 +544,22 @@ function handleStatus(msg) {
 }
 function handleLLMResponse(msg) {
     setAgent("orchestrator", "done", "PLAN READY");
-    setEdge("o-c", "active");
-    setAgent("coder", "active", "SYNTHESISING");
-    agents.coder.payload = {
-        kind: "code",
-        title: "Coding Agent",
-        meta: `${msg.used_fallback ? "fallback" : "ai"} · ${msg.code.length} bytes · ${new Date(msg.timestamp * 1000).toISOString().slice(11, 19)}`,
-        text: msg.analysis,
-        code: msg.code,
-    };
-    selectAgent("coder");
+    setTimeout(() => {
+        spawnAgent("coder");
+        setAgent("coder", "active", "SYNTHESISING");
+        agents.coder.payload = {
+            kind: "code",
+            title: "Coding Agent",
+            meta: `${msg.used_fallback ? "fallback" : "ai"} · ${msg.code.length} bytes · ${new Date(msg.timestamp * 1000).toISOString().slice(11, 19)}`,
+            text: msg.analysis,
+            code: msg.code,
+        };
+        selectAgent("coder");
+    }, 250);
 }
 function handleFlashComplete(msg) {
     if (msg.success) {
         setAgent("verifier", "done", "COMPILED ✓");
-        setEdge("c-v", "done");
-        setEdge("o-c", "done");
-        setEdge("d-o", "done");
         agents.verifier.payload = {
             kind: "result",
             title: "Verifier",
@@ -383,7 +572,7 @@ function handleFlashComplete(msg) {
             renderDetail("verifier");
     }
     else {
-        setAgent("verifier", "active", "FLASH FAILED");
+        setAgent("verifier", "fail", "FLASH FAILED");
         agents.verifier.payload = {
             kind: "result",
             title: "Verifier",
@@ -458,7 +647,14 @@ async function postJSON(path) {
     catch { /* surfaced through link status */ }
 }
 els.btnAttack.addEventListener("click", () => { void postJSON("/api/simulate/attack"); });
-els.btnClear.addEventListener("click", () => { void postJSON("/api/simulate/clear"); });
+els.btnClear.addEventListener("click", () => {
+    // Local UI reset — the /clear endpoint doesn't broadcast a status change,
+    // so without this the next attack would short-circuit on stale spawnedAgents.
+    closeIncidentPanel();
+    resetAll();
+    setSystemStatus("monitoring");
+    void postJSON("/api/simulate/clear");
+});
 // ── Clock ─────────────────────────────────────────────────────────────────
 setInterval(() => {
     els.clock.textContent = new Date().toISOString().slice(11, 19);
@@ -466,3 +662,20 @@ setInterval(() => {
 // ── Boot ──────────────────────────────────────────────────────────────────
 renderDetail(null);
 connect();
+// ── Digital twin (Three.js) ───────────────────────────────────────────────
+const twinCanvas = document.getElementById("twinCanvas");
+const twinTag = document.getElementById("twinTag");
+const twinPanel = document.getElementById("twinPanel");
+const twinCollapse = document.getElementById("twinCollapse");
+// --- NEW: Variable to hold our scene API ---
+let sceneApi = null; // using 'any' to avoid circular type imports, or import { SceneApi } from "./scene3d.js"
+if (twinPanel && twinCollapse) {
+    twinCollapse.addEventListener("click", () => {
+        twinPanel.classList.toggle("collapsed");
+    });
+}
+if (twinCanvas && twinTag) {
+    initScene(twinCanvas, (msg) => { twinTag.textContent = msg; })
+        .then((api) => { sceneApi = api; }) // --- CHANGED: Store the API ---
+        .catch((err) => { twinTag.textContent = `ERR: ${err.message}`; });
+}

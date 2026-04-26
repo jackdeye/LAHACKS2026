@@ -9,6 +9,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -77,85 +85,55 @@
     </aside>
 
     <main class="canvas">
-      <div class="canvas-bg"></div>
-
-      <div class="agent-flow" id="agentFlow">
-        <div class="agent" data-agent="debugger" data-state="idle">
-          <div class="agent-pulse"></div>
-          <div class="agent-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-              <circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>
-            </svg>
-          </div>
-          <div class="agent-name">Debugger</div>
-          <div class="agent-role">reads sensor logs</div>
-          <div class="agent-status">IDLE</div>
+      <section class="twin-panel" id="twinPanel">
+        <div class="twin-head">
+          <button class="twin-collapse" id="twinCollapse" aria-label="Toggle digital twin">
+            <span class="chevron"></span>
+          </button>
+          <span class="twin-title">DIGITAL TWIN</span>
+          <span class="twin-sub">Live circuit · drag to orbit · scroll to zoom</span>
+          <span class="twin-tag" id="twinTag">LOADING…</span>
         </div>
-
-        <div class="edge" data-edge="d-o"><span class="edge-flow"></span></div>
-
-        <div class="agent" data-agent="orchestrator" data-state="idle">
-          <div class="agent-pulse"></div>
-          <div class="agent-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-              <circle cx="12" cy="12" r="3"/>
-              <circle cx="12" cy="12" r="8"/>
-              <path d="M12 4v3M12 17v3M4 12h3M17 12h3"/>
-            </svg>
-          </div>
-          <div class="agent-name">Orchestrator</div>
-          <div class="agent-role">plans the response</div>
-          <div class="agent-status">IDLE</div>
-        </div>
-
-        <div class="edge" data-edge="o-c"><span class="edge-flow"></span></div>
-
-        <div class="agent" data-agent="coder" data-state="idle">
-          <div class="agent-pulse"></div>
-          <div class="agent-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-              <path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/>
-            </svg>
-          </div>
-          <div class="agent-name">Coding Agent</div>
-          <div class="agent-role">synthesises patch</div>
-          <div class="agent-status">IDLE</div>
-        </div>
-
-        <div class="edge" data-edge="c-v"><span class="edge-flow"></span></div>
-
-        <div class="agent" data-agent="verifier" data-state="idle">
-          <div class="agent-pulse"></div>
-          <div class="agent-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-              <path d="m4 12 5 5L20 6"/>
-            </svg>
-          </div>
-          <div class="agent-name">Verifier</div>
-          <div class="agent-role">compiles &amp; flashes</div>
-          <div class="agent-status">IDLE</div>
-        </div>
-      </div>
-
-      <section class="detail" id="detail">
-        <div class="detail-head">
-          <div class="detail-title">
-            <span class="detail-dot" id="detailDot"></span>
-            <span id="detailName">Awaiting incident</span>
-          </div>
-          <span class="detail-tag" id="detailTag">STANDBY</span>
-        </div>
-        <div class="detail-body" id="detailBody">
-          <div class="detail-placeholder">
-            The mesh is monitoring telemetry. When the Debugger flags an anomaly,
-            the Orchestrator dispatches the Coding Agent to synthesise a virtual-sensor
-            patch, and the Verifier compiles and flashes it.
-          </div>
+        <div class="twin-canvas-wrap">
+          <canvas id="twinCanvas"></canvas>
         </div>
       </section>
+
+      <aside class="incident-panel" id="incidentPanel" data-open="false">
+        <div class="incident-head">
+          <div class="incident-title">
+            <span class="incident-dot"></span>
+            <span>Incident Response</span>
+          </div>
+          <button class="incident-close" id="incidentClose" aria-label="Close incident panel">×</button>
+        </div>
+
+        <div class="incident-graph-wrap">
+          <svg class="incident-graph" id="agentGraph" viewBox="0 0 340 460" preserveAspectRatio="xMidYMid meet">
+            <g id="graphViewport">
+              <g class="graph-edges" id="graphEdges"></g>
+              <g class="graph-nodes" id="graphNodes"></g>
+            </g>
+          </svg>
+          <button class="graph-recenter" id="graphRecenter" type="button" aria-label="Recenter graph">⌖</button>
+        </div>
+
+        <div class="incident-detail" id="incidentDetail">
+          <div class="detail-head">
+            <div class="detail-title">
+              <span class="detail-dot" id="detailDot"></span>
+              <span id="detailName">No agent selected</span>
+            </div>
+            <span class="detail-tag" id="detailTag">—</span>
+          </div>
+          <div class="detail-body" id="detailBody">
+            <div class="detail-placeholder">Click a spawned agent to inspect its output.</div>
+          </div>
+        </div>
+      </aside>
     </main>
   </div>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
