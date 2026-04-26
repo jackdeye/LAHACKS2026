@@ -866,21 +866,83 @@ type HardenStep = "recon" | "attack" | "analysis" | "patch";
 type StepState = "idle" | "active" | "done";
 let hardenState: HardenState = "idle";
 
-// Step graph (mid-column lower half). Pre-rendered in dashboard.html; we just
-// flip data-state on the right <g data-step="…"> as the operator progresses,
-// and tint the connecting edges between completed/active hand-offs.
+// Pipeline cards are pre-rendered in dashboard.html but hidden by default.
+// Each phase only enters the canvas when its action button is first pressed,
+// and the layout reflows so the new card joins the zigzag without overlapping
+// the previous ones — the floating panel itself is also hidden until at least
+// one card is visible.
 const HARDEN_STEP_ORDER: HardenStep[] = ["recon", "attack", "analysis", "patch"];
 const HARDEN_STEP_TEAM: Record<HardenStep, "red" | "blue"> = {
   recon: "red", attack: "red", analysis: "blue", patch: "blue",
 };
+const visibleSteps: HardenStep[] = [];
+const SVG_NS_HARDEN = "http://www.w3.org/2000/svg";
+
 function stepNode(step: HardenStep): HTMLElement | null {
   return document.querySelector<HTMLElement>(`#hardenStepsNodes .step-card[data-step="${step}"]`);
 }
+
+// (xPercent, yPercent) for a card at index `i` of `n` visible cards. Cards are
+// distributed evenly between 14% and 86% horizontally with a single anchor at
+// 50% when only one is visible. Vertical position alternates 35% / 70% so the
+// pipeline reads as a zigzag (1st high, 2nd low, 3rd high, …).
+function stepPosition(i: number, n: number): { x: number; y: number } {
+  const x = n <= 1 ? 50 : 14 + (i / (n - 1)) * 72;
+  const y = i % 2 === 0 ? 35 : 70;
+  return { x, y };
+}
+
+function relayoutSteps(): void {
+  const n = visibleSteps.length;
+  els.canvas.setAttribute("data-pipeline-active", n > 0 ? "true" : "false");
+  for (const step of HARDEN_STEP_ORDER) {
+    const node = stepNode(step);
+    if (!node) continue;
+    const i = visibleSteps.indexOf(step);
+    if (i === -1) {
+      node.removeAttribute("data-visible");
+      continue;
+    }
+    const { x, y } = stepPosition(i, n);
+    node.style.left = `${x}%`;
+    node.style.top = `${y}%`;
+    node.setAttribute("data-visible", "true");
+  }
+  // Rebuild edges to connect each adjacent pair of *visible* cards in order.
+  const edgesHost = document.getElementById("hardenStepsEdges");
+  if (!edgesHost) return;
+  while (edgesHost.firstChild) edgesHost.removeChild(edgesHost.firstChild);
+  for (let i = 0; i < n - 1; i++) {
+    const a = stepPosition(i, n);
+    const b = stepPosition(i + 1, n);
+    const line = document.createElementNS(SVG_NS_HARDEN, "line");
+    line.classList.add("step-edge");
+    line.setAttribute("data-from", visibleSteps[i]);
+    line.setAttribute("data-to", visibleSteps[i + 1]);
+    line.setAttribute("x1", String(a.x));
+    line.setAttribute("y1", String(a.y));
+    line.setAttribute("x2", String(b.x));
+    line.setAttribute("y2", String(b.y));
+    edgesHost.appendChild(line);
+  }
+  refreshStepEdges();
+}
+
+function showStep(step: HardenStep): void {
+  if (visibleSteps.includes(step)) return;
+  visibleSteps.push(step);
+  relayoutSteps();
+}
+
 function setHardenStep(step: HardenStep, state: StepState): void {
+  if (state === "active" || state === "done") {
+    showStep(step);
+  }
   const n = stepNode(step);
   if (n) n.setAttribute("data-state", state);
   refreshStepEdges();
 }
+
 function refreshStepEdges(): void {
   document.querySelectorAll<SVGLineElement>("#hardenStepsEdges .step-edge").forEach((edge) => {
     const from = edge.dataset.from as HardenStep;
@@ -896,8 +958,18 @@ function refreshStepEdges(): void {
     }
   });
 }
+
 function resetHardenSteps(): void {
-  for (const s of HARDEN_STEP_ORDER) setHardenStep(s, "idle");
+  visibleSteps.length = 0;
+  for (const step of HARDEN_STEP_ORDER) {
+    const n = stepNode(step);
+    if (!n) continue;
+    n.setAttribute("data-state", "idle");
+    n.removeAttribute("data-visible");
+  }
+  els.canvas.setAttribute("data-pipeline-active", "false");
+  const edgesHost = document.getElementById("hardenStepsEdges");
+  if (edgesHost) while (edgesHost.firstChild) edgesHost.removeChild(edgesHost.firstChild);
 }
 
 function sendWs(action: string, extra: Record<string, unknown> = {}): void {

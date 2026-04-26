@@ -513,6 +513,11 @@ export async function initScene(canvas, onProgress) {
         ro.observe(wrap);
     // ── Render loop with spinning fan & pulsing animations ─────────────────
     const failingSensors = new Set();
+    // Every sensor that participates in the anomaly-highlight system. Anything
+    // listed here is allowed to be passed to setSensorFailure(); the loop below
+    // updates its materials / halo / light each frame regardless of which one
+    // is currently flagged.
+    const ANOMALY_SENSORS = ["dht11", "pot", "pressure", "current"];
     const clock = new THREE.Clock();
     function tick() {
         const dt = clock.getDelta();
@@ -520,33 +525,35 @@ export async function initScene(canvas, onProgress) {
         fan.rotation.z -= dt * 8; // spinning fan
         // 0..1 sine pulse at ~3 Hz
         const pulse01 = 0.5 + 0.5 * Math.sin(time * 6);
-        ["dht11", "pot"].forEach((id) => {
+        ANOMALY_SENSORS.forEach((id) => {
             const part = parts[id];
             if (!part)
                 return;
             const failing = failingSensors.has(id);
-            // (1) Emissive glow on every body material — cranked
+            // (1) Emissive glow on every body material — drive both states each
+            // frame so we can't leak a stale glow from material defaults
+            // (MeshStandardMaterial.emissiveIntensity defaults to 1).
             const mats = part.userData.glowMats ?? [];
             for (const m of mats) {
                 if (failing) {
                     m.emissive.setHex(0xff4040);
-                    m.emissiveIntensity = 3.5 + pulse01 * 4.5; // 3.5 → 8.0 (extreme bloom)
+                    m.emissiveIntensity = 3.5 + pulse01 * 4.5;
                 }
-                else if (m.emissiveIntensity !== 0) {
+                else {
                     m.emissive.setHex(0x000000);
                     m.emissiveIntensity = 0;
                 }
             }
-            // (2) Ground halo — louder & wider
+            // (2) Ground halo
             const halo = part.userData.halo;
             if (halo) {
                 const mat = halo.material;
                 if (failing) {
-                    mat.opacity = 0.7 + pulse01 * 0.3; // 0.7 → 1.0
-                    const s = 1.3 + pulse01 * 0.7; // 1.3× → 2.0×
+                    mat.opacity = 0.7 + pulse01 * 0.3;
+                    const s = 1.3 + pulse01 * 0.7;
                     halo.scale.set(s, s, 1);
                 }
-                else if (mat.opacity !== 0) {
+                else {
                     mat.opacity = 0;
                     halo.scale.set(1, 1, 1);
                 }
@@ -554,7 +561,7 @@ export async function initScene(canvas, onProgress) {
             // (3) Point light spilling red onto nearby surfaces
             const light = part.userData.failLight;
             if (light) {
-                light.intensity = failing ? 8 + pulse01 * 12 : 0; // 8 → 20
+                light.intensity = failing ? 8 + pulse01 * 12 : 0;
             }
         });
         controls.update();

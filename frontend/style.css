@@ -702,7 +702,12 @@ html, body {
   transition: padding 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .canvas[data-harden="true"] {
-  padding: 0 calc(var(--harden-side) + 16px) calc(var(--harden-bottom) + 16px) calc(var(--harden-side) + 16px);
+  padding: 0 calc(var(--harden-side) + 16px) 0 calc(var(--harden-side) + 16px);
+}
+/* Bottom padding only opens up once Recon arrives in the pipeline; until then
+   the twin holds the full middle column. */
+.canvas[data-harden="true"][data-pipeline-active="true"] {
+  padding-bottom: calc(var(--harden-bottom) + 16px);
 }
 .canvas[data-harden="true"] .incident-panel {
   display: none !important;
@@ -734,7 +739,8 @@ html, body {
     left 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
     right 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.canvas[data-harden="true"] .harden-steps {
+/* Pipeline panel only enters once at least one phase has been triggered. */
+.canvas[data-harden="true"][data-pipeline-active="true"] .harden-steps {
   pointer-events: auto;
   opacity: 1;
   transform: translateY(0) scale(1);
@@ -825,12 +831,24 @@ html, body {
     0 1px 2px rgba(15, 15, 15, 0.05),
     0 6px 16px rgba(15, 15, 15, 0.08);
   padding: 8px 10px 9px;
+  /* Default: hidden until JS flags the card visible by adding data-visible. */
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    left 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    opacity 0.4s ease;
+}
+.step-card[data-visible="true"] {
+  opacity: 1;
+  pointer-events: auto;
   animation: step-card-float 7s ease-in-out infinite;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, opacity 0.25s ease;
 }
 .step-card[data-team="red"]  { --c: var(--danger); --c-bg: var(--danger-bg); border-left-color: var(--danger); }
 .step-card[data-team="blue"] { --c: var(--cyan);   --c-bg: var(--cyan-bg);   border-left-color: var(--cyan); }
-.step-card[data-state="idle"] { opacity: 0.9; }
+.step-card[data-visible="true"][data-state="idle"] { opacity: 0.9; }
 .step-card[data-state="active"] {
   border-color: var(--c);
   border-left-color: var(--c);
