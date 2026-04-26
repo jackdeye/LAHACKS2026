@@ -178,7 +178,7 @@
         <div class="incident-head">
           <div class="incident-title">
             <span class="incident-dot"></span>
-            <span>Incident Response</span>
+            <span id="incidentTitleText">Incident Response</span>
           </div>
           <button class="incident-close" id="incidentClose" aria-label="Close incident panel">×</button>
         </div>
@@ -191,6 +191,29 @@
             </g>
           </svg>
           <button class="graph-recenter" id="graphRecenter" type="button" aria-label="Recenter graph">⌖</button>
+        </div>
+
+        <div class="agent-feed" id="agentFeed">
+          <div class="agent-feed-row" data-agent="debugger" data-state="idle">
+            <span class="agent-feed-name">Debugger</span>
+            <span class="agent-feed-state" id="feedState_debugger">idle</span>
+            <div class="agent-feed-text" id="feedText_debugger">awaiting incident</div>
+          </div>
+          <div class="agent-feed-row" data-agent="orchestrator" data-state="idle">
+            <span class="agent-feed-name">Orchestrator</span>
+            <span class="agent-feed-state" id="feedState_orchestrator">idle</span>
+            <div class="agent-feed-text" id="feedText_orchestrator">—</div>
+          </div>
+          <div class="agent-feed-row" data-agent="coder" data-state="idle">
+            <span class="agent-feed-name">Coding Agent</span>
+            <span class="agent-feed-state" id="feedState_coder">idle</span>
+            <div class="agent-feed-text" id="feedText_coder">—</div>
+          </div>
+          <div class="agent-feed-row" data-agent="verifier" data-state="idle">
+            <span class="agent-feed-name">Verifier</span>
+            <span class="agent-feed-state" id="feedState_verifier">idle</span>
+            <div class="agent-feed-text" id="feedText_verifier">—</div>
+          </div>
         </div>
 
         <div class="incident-detail" id="incidentDetail">

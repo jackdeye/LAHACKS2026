@@ -2,6 +2,7 @@ import asyncio
 import json
 import math
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -190,48 +191,66 @@ class SimulatedReader:
 class SerialReader:
     """Reads JSON telemetry from Arduino via serial port.
 
-    Arduino should emit one JSON object per line, e.g.:
-      {"t":1629,"temp_c":22.4,"hum":44.5,"press":110,"light":0,"fan":107,"alarm":0}
-    Lines that aren't valid JSON (boot banners, debug prints) are silently
-    skipped so a noisy serial stream doesn't crash the telemetry loop.
+    Uses a blocking pyserial reader on a background thread feeding an
+    asyncio.Queue. The async pyserial-asyncio path is avoided because the
+    Arduino's DTR-reset on port-open briefly disconnects the USB-CDC link;
+    the StreamReader latches that as EOF and every subsequent readline()
+    returns b'' instantly, hot-spinning whatever async loop is running.
     """
 
     def __init__(self, port: str = "/dev/ttyACM0", baud: int = 115200):
         self.port = port
         self.baud = baud
-        self._reader = None
+        self._queue: "asyncio.Queue[SensorReading]" = asyncio.Queue(maxsize=200)
+        self._thread: Optional[threading.Thread] = None
 
-    async def connect(self):
-        import serial_asyncio  # type: ignore
-        self._reader, _ = await serial_asyncio.open_serial_connection(
-            url=self.port, baudrate=self.baud
+    def _ensure_thread(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        loop = asyncio.get_running_loop()
+        self._thread = threading.Thread(
+            target=self._reader_loop, args=(loop,), name="serial-reader", daemon=True,
         )
+        self._thread.start()
+
+    def _reader_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        import serial  # blocking pyserial
+        while True:
+            try:
+                ser = serial.Serial(self.port, self.baud, timeout=1)
+            except Exception:
+                time.sleep(1.0)
+                continue
+            try:
+                while True:
+                    raw = ser.readline()
+                    if not raw:
+                        continue  # 1-second timeout tick; keep waiting
+                    line = raw.decode(errors="replace").strip()
+                    if not line.startswith("{"):
+                        continue
+                    try:
+                        data = json.loads(line)
+                        reading = SensorReading(
+                            timestamp=time.time(),
+                            temperature=float(data["temp_c"]),
+                            pressure=float(data["press"]),
+                            current=float(data["light"]),
+                            humidity=float(data.get("hum", 0.0)),
+                            light=float(data["light"]),
+                            fan=float(data.get("fan", 0.0)),
+                            alarm=int(data.get("alarm", 0)),
+                        )
+                    except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+                        continue
+                    asyncio.run_coroutine_threadsafe(self._queue.put(reading), loop)
+            except Exception:
+                pass
+            finally:
+                try: ser.close()
+                except Exception: pass
+                time.sleep(0.5)  # backoff before reconnect
 
     async def read_next(self) -> SensorReading:
-        if self._reader is None:
-            await self.connect()
-        while True:
-            raw = await self._reader.readline()
-            line = raw.decode(errors="replace").strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            try:
-                temp_c = float(data["temp_c"])
-                press = float(data["press"])
-                light = float(data["light"])
-            except (KeyError, ValueError, TypeError):
-                continue
-            return SensorReading(
-                timestamp=time.time(),
-                temperature=temp_c,
-                pressure=press,
-                current=light,
-                humidity=float(data.get("hum", 0.0)),
-                light=light,
-                fan=float(data.get("fan", 0.0)),
-                alarm=int(data.get("alarm", 0)),
-            )
+        self._ensure_thread()
+        return await self._queue.get()

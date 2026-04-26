@@ -208,6 +208,7 @@ async def handle_anomaly(result):
             "reason": result.reason,
             "confidence": result.confidence,
             "stats": result.stats,
+            "compromised_sensor": result.compromised_sensor,
             "timestamp": time.time(),
         })
         await asyncio.sleep(1)
@@ -219,7 +220,27 @@ async def handle_anomaly(result):
             "status": "llm_processing",
             "message": "Dispatching telemetry to air-gapped intelligence layer…",
         })
-        llm_resp = await state.llm.generate_patch(result.telemetry_window)
+        try:
+            llm_resp = await state.llm.generate_patch(
+                result.telemetry_window,
+                compromised_sensor=result.compromised_sensor,
+            )
+        except Exception as e:
+            state.status = "error"
+            await broadcast({
+                "type": "llm_failed",
+                "message": f"Local LLM unreachable: {e}",
+                "timestamp": time.time(),
+            })
+            await asyncio.sleep(3)
+            state.status = "monitoring"
+            state.detector.reset()
+            await broadcast({
+                "type": "status",
+                "status": "monitoring",
+                "message": "Pipeline aborted — restart Ollama and re-trigger the attack.",
+            })
+            return
         state.last_patch_code = llm_resp.code
         await broadcast({
             "type": "llm_response",
@@ -573,20 +594,26 @@ async def websocket_endpoint(ws: WebSocket):
             elif action == "request_red_plan":
                 asyncio.create_task(handle_red_plan())
                 await ws.send_text(json.dumps({"type": "ack", "action": "request_red_plan"}))
-            elif action == "launch_attack" and isinstance(state.reader, SimulatedReader):
+            elif action == "launch_attack":
                 plan = state.last_red_plan or _heuristic_red_plan()
-                spec = state.reader.trigger_attack(
-                    target=plan["target"],
-                    kind=plan["kind"],
-                    magnitude=float(plan.get("magnitude", 1.0)),
-                )
+                target = plan["target"]
+                kind = plan["kind"]
+                magnitude = float(plan.get("magnitude", 1.0))
+                # When connected to the real Arduino the Flipper is the actual
+                # attacker; we only mutate the SimulatedReader when we have one,
+                # but we always emit the message so the UI advances.
+                if isinstance(state.reader, SimulatedReader):
+                    spec = state.reader.trigger_attack(
+                        target=target, kind=kind, magnitude=magnitude,
+                    )
+                    target, kind, magnitude = spec.target, spec.kind, spec.magnitude
                 state.status = "anomaly_detected"
                 state.anomaly_count += 1
                 await broadcast({
                     "type": "harden_attack_launched",
-                    "target": spec.target,
-                    "kind": spec.kind,
-                    "magnitude": spec.magnitude,
+                    "target": target,
+                    "kind": kind,
+                    "magnitude": magnitude,
                     "timestamp": time.time(),
                 })
             elif action == "request_blue_patch":

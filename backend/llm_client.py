@@ -31,6 +31,8 @@ Statistical summary:
 - Pressure variance:    {pres_var:.2f}
 - Current variance:     {curr_var:.5f}
 
+Suspected compromised channel (from on-device alarm + correlation): {compromised_sensor}
+
 Produce the remediation brief."""
 
 
@@ -281,7 +283,11 @@ class LLMClient:
                 used_fallback=True,
             )
 
-    async def generate_patch(self, telemetry_window: list) -> LLMResponse:
+    async def generate_patch(
+        self,
+        telemetry_window: list,
+        compromised_sensor: str = "temperature",
+    ) -> LLMResponse:
         if self.force_fallback:
             return LLMResponse(
                 code=FALLBACK_PATCH,
@@ -300,45 +306,38 @@ class LLMClient:
             n=n, total=total,
             telemetry_json=telemetry_json,
             temp_var=s["temp_var"], pres_var=s["pres_var"], curr_var=s["curr_var"],
+            compromised_sensor=compromised_sensor or "temperature",
         )
 
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                # Stage 1: analyst (llama 70B)
-                analysis_raw = await self._ollama(
-                    client, self.analysis_model, ANALYST_SYSTEM, analyst_prompt,
-                    num_predict=512,
-                )
-                analysis = analysis_raw.strip()
-                if not analysis:
-                    raise ValueError("Empty analyst response")
+        # No silent fallback: errors propagate so the dashboard reports the
+        # local model as unreachable instead of pretending a patch was synthesised.
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            analysis_raw = await self._ollama(
+                client, self.analysis_model, ANALYST_SYSTEM, analyst_prompt,
+                num_predict=512,
+            )
+            analysis = analysis_raw.strip()
+            if not analysis:
+                raise RuntimeError("Empty response from analyst model")
 
-                # Stage 2: coder (qwen-coder)
-                coder_prompt = CODER_USER_TEMPLATE.format(
-                    analysis=analysis,
-                    n=n, total=total,
-                    telemetry_json=telemetry_json,
-                )
-                code_raw = await self._ollama(
-                    client, self.coder_model, CODER_SYSTEM, coder_prompt,
-                    num_predict=2048,
-                )
-
-            code = re.sub(r"```(?:cpp|arduino|c\+\+|c|ino)?", "", code_raw)
-            code = code.replace("```", "").strip()
-            if not code:
-                raise ValueError("Empty coder response")
-
-            return LLMResponse(
-                code=code,
+            coder_prompt = CODER_USER_TEMPLATE.format(
                 analysis=analysis,
-                raw=f"[analyst]\n{analysis_raw}\n\n[coder]\n{code_raw}",
-                used_fallback=False,
+                n=n, total=total,
+                telemetry_json=telemetry_json,
             )
-        except Exception as e:
-            return LLMResponse(
-                code=FALLBACK_PATCH,
-                analysis=f"{FALLBACK_ANALYSIS}\n\n(Live LLM pipeline unavailable: {e})",
-                raw=str(e),
-                used_fallback=True,
+            code_raw = await self._ollama(
+                client, self.coder_model, CODER_SYSTEM, coder_prompt,
+                num_predict=2048,
             )
+
+        code = re.sub(r"```(?:cpp|arduino|c\+\+|c|ino)?", "", code_raw)
+        code = code.replace("```", "").strip()
+        if not code:
+            raise RuntimeError("Empty response from coder model")
+
+        return LLMResponse(
+            code=code,
+            analysis=analysis,
+            raw=f"[analyst]\n{analysis_raw}\n\n[coder]\n{code_raw}",
+            used_fallback=False,
+        )
