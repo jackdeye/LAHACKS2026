@@ -4,9 +4,10 @@ App(
     apptype=FlipperAppType.EXTERNAL,
     entry_point="aegis_attacker_app",
     requires=["gui"],
+    fap_libs=["infrared"],
     stack_size=2 * 1024,
-    fap_category="GPIO",
+    fap_category="Infrared",
     fap_author="Aegis Edge",
-    fap_version="1.0",
-    fap_description="Sensor-spoof signal injector for the Aegis Edge demo.",
+    fap_version="1.1",
+    fap_description="IR sensor-spoof injector for the Aegis Edge demo.",
 )

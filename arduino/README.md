@@ -42,7 +42,7 @@ Install the AVR core and the libraries the sketch uses:
 
 ```sh
 arduino-cli core install arduino:avr
-arduino-cli lib install "DHT sensor library" "Adafruit Unified Sensor" LiquidCrystal
+arduino-cli lib install "DHT sensor library" "Adafruit Unified Sensor" LiquidCrystal IRremote
 ```
 
 ### Fix executable bits (NixOS-only quirk)

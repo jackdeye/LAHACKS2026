@@ -23,7 +23,7 @@ build/flash instructions.
        ┌─────────────────────────────────────────────────────┐
        │                  Arduino UNO R3                      │
        │                                                      │
-   DHT11 ──D2──▶│  reads temp/humidity                         │
+   IR RX ──D3──▶│  receives Flipper attack heartbeat           │
    POT ────A0──▶│  reads "airway pressure" (analog 0–1023)     │
    ◀──────D9──  │  drives transistor → DC motor + fan          │
    ◀──D4-D12──  │  drives 16-pin LCD1602                       │
@@ -33,16 +33,16 @@ build/flash instructions.
        │        └──── USB serial @ 115200 ─→ host Python bridge │
        └─────────────────────────────────────────────────────┘
                               ▲
-                              │ injects 3.3 V on A0 via 1 kΩ
+                              │ 38 kHz NEC IR (line of sight)
                               │
                        ┌──────┴───────┐
-                       │ Flipper Zero │   (PA7 → 1 kΩ → A0, GND ↔ GND)
+                       │ Flipper Zero │   (no wires — built-in IR LED)
                        │ aegis_attacker│
                        └──────────────┘
 ```
 
-The vent rig stands alone. Flipper is a bolt-on attacker that overrides the
-pressure reading without RF.
+The vent rig stands alone. Flipper is an untethered attacker that fakes a
+broken sensor over IR — no shared ground, no RF, just line of sight.
 
 ---
 
@@ -54,7 +54,7 @@ pressure reading without RF.
 | :-- | :--- | :--- |
 | 1 | ELEGOO UNO R3 | Microcontroller |
 | 1 | Breadboard (830-tie) | Wiring substrate |
-| 1 | DHT11 module | Inspired-gas temp + humidity |
+| 1 | DHT11 module | (legacy — sensor is dead, temp/humidity are firmware-synthesised; can be omitted) |
 | 1 | 10 kΩ rotary potentiometer | "Airway pressure" analog input |
 | 1 | DC motor (mini hobby) + fan blade | Blower |
 | 1 | NPN transistor (S8050 or PN2222A) | Low-side motor switch |
@@ -64,15 +64,14 @@ pressure reading without RF.
 | 1 | Active buzzer | Alarm |
 | 1 | LED (any color) | Status indicator |
 | 2 | 220 Ω resistor | Transistor base + LED current-limit |
+| 1 | HX1838 IR receiver module (38 kHz demod, 3-pin) | Picks up Flipper attack heartbeat |
 | — | M-M and M-F jumper wires | Wiring |
 
 ### Attack rig
 
 | Qty | Part | Role |
 | :-- | :--- | :--- |
-| 1 | Flipper Zero running `aegis_attacker.fap` | Attacker |
-| 1 | 1 kΩ resistor | A0 injection — current limit |
-| 2 | M-F jumpers | Flipper header → breadboard |
+| 1 | Flipper Zero running `aegis_attacker.fap` | Attacker (uses built-in IR LED) |
 
 ---
 
@@ -82,27 +81,25 @@ pressure reading without RF.
 
 | Pin | Connects to | Notes |
 | :-- | :---------- | :---- |
-| 5V          | Breadboard + rail | Powers all modules |
-| GND         | Breadboard − rail | **Common ground — Flipper GND ties here too** |
-| D2          | DHT11 DATA | |
+| 5V          | Breadboard + rail | Powers all modules (incl. IR receiver) |
+| GND         | Breadboard − rail | Common ground for all on-board modules |
+| D3          | IR receiver DATA (HX1838 OUT) | Flipper attack heartbeat |
 | D4          | LCD RS | |
 | D5          | LCD E (Enable) | |
 | D6          | LCD D4 | 4-bit mode |
 | D8          | Buzzer (+) | |
-| D9 (PWM)    | Transistor base via 220 Ω | Fan speed |
+| D9 (PWM)    | Transistor base via 220 Ω | Fan speed (Timer1 — clear of IRremote's Timer2) |
 | D10         | LCD D5 | |
 | D11         | LCD D6 | |
 | D12         | LCD D7 | |
 | D13         | Status LED via 220 Ω | On-board LED also blinks |
-| A0          | Pot wiper **and** Flipper PA7 via 1 kΩ | Pressure / spoof injection |
-| D3, D7, A1–A5 | unused | A4/A5 reserved if you ever swap to I²C LCD |
+| A0          | Pot wiper | Pressure |
+| D2, D7, A1–A5 | unused | A4/A5 reserved if you ever swap to I²C LCD |
 
-### Flipper Zero (top header)
+### Flipper Zero
 
-| Pin # | Name | Connects to | Notes |
-| :---- | :--- | :---------- | :---- |
-| 2  | PA7 | Arduino A0 via 1 kΩ | Injection output |
-| 11 | GND | Arduino GND rail | Mandatory — without this the attack does nothing |
+No header wiring. The attacker uses the Flipper's built-in 38 kHz IR LED
+on the top edge — aim it at the IR receiver from up to ~5 m away.
 
 ---
 
@@ -120,21 +117,26 @@ firmware's serial output looks sane before moving on.
 5. **LCD1602** — wire VSS/VDD/RS/E/D4–D7 plus the contrast trim-pot. Sweep
    the trim until characters appear.
 6. **Buzzer + status LED.**
-7. **Flipper injection** — solder/jumper PA7 → 1 kΩ → A0, and GND ↔ GND.
-   Launch `aegis_attacker` on the Flipper, leave it in `Standby`, confirm
-   the pot still controls A0 normally.
+7. **IR receiver** — wire the HX1838 module's VCC/GND/OUT to 5V/GND/D3.
+   Launch `aegis_attacker` on the Flipper, leave it in `IDLE`, confirm the
+   vent still runs normally and the alarm only fires when you toggle the
+   Flipper into `ATTACKING` while aimed at the receiver.
 
 ---
 
 ## Wiring details
 
-### DHT11 (3-pin module — pull-up is built in)
+### IR receiver (HX1838 / equivalent 38 kHz demodulator)
 
 ```
-DHT11 VCC  → 5V rail
-DHT11 GND  → GND rail
-DHT11 DATA → D2
+Module pin   Wire to
+VCC          5V rail
+GND          GND rail
+OUT (DATA)   D3
 ```
+
+Most kit modules already include the bias resistor and decoupling cap on
+the PCB — no extras needed. Aim the Flipper's top edge at the dome.
 
 ### Pressure potentiometer
 
@@ -143,9 +145,6 @@ Pin 1 (outer) → 5V rail
 Pin 2 (wiper) → A0
 Pin 3 (outer) → GND rail
 ```
-
-This is the line the Flipper attacks. The Flipper's 1 kΩ injection wire
-also lands on A0 (see [Attack modes](#attack-modes)).
 
 ### DC motor + fan, low-side NPN switch
 
@@ -199,19 +198,21 @@ Buzzer (+) → D8         LED anode  → 220 Ω → D13
 Buzzer (−) → GND rail   LED cathode → GND rail
 ```
 
-### Flipper Zero injection
+### Flipper Zero IR injection
 
-```
-Flipper pin 11  (GND) ──────────────────── breadboard GND rail
-Flipper pin 2   (PA7) ────[ 1 kΩ ]──────── A0  (same node as the pot wiper)
-```
+No wires. The Flipper's built-in IR LED (top edge) emits a 38 kHz NEC
+heartbeat — `addr=0x00, cmd=0x42` — every ~150 ms while the app is in
+`ATTACKING`. The HX1838 demodulates it to a clean digital pulse train on
+D3 and the IRremote library on the UNO decodes the frame.
 
-Why 1 kΩ:
+Range and aim:
 
-- Flipper PA7 push-pull (~50 Ω out) easily dominates the pot's ~5 kΩ wiper
-  impedance, so the spoofed value sticks.
-- The resistor caps any back-current to ~5 mA if A0 is ever wrongly driven
-  as an output, protecting the STM32's 3.3 V GPIO from 5 V back-feed.
+- ~5 m line-of-sight in normal indoor lighting; less under direct sun.
+- The HX1838 has a fairly wide acceptance cone (~±45°), but the Flipper's
+  IR LED is more directional. If frames drop out, point more carefully.
+- The Arduino treats "attack on" as `(now - last_packet) < 400 ms`, so a
+  single missed frame is harmless; stopping the Flipper's transmission
+  releases the alarm within ~400 ms.
 
 ---
 
@@ -232,22 +233,25 @@ with a 7–12 V wall-wart.
 
 ## Attack modes
 
-Implemented in `flipper/aegis_attacker/aegis_attacker.c`. Cycle modes with
-the Flipper's OK button, adjust pulse rate with Up/Down.
+Implemented in `flipper/aegis_attacker/aegis_attacker.c`. Toggle with
+the Flipper's OK button.
 
-| Mode | PA7 state | A0 voltage | ADC reading | Demo behavior |
-| :--- | :-------- | :--------- | :---------- | :------------ |
-| **Standby** | Analog / high-Z | pot wiper, 0–5 V | 0–1023 | Normal vent operation. |
-| **Spoof / HIGH** | Push-pull HIGH (3.3 V) | ~3.0 V | ~640 | Pressure pinned in the firmware's safe band (150–850) — alarm never fires regardless of real conditions. The headline attack. |
-| **Noise / Pulse** | Square wave, 40 µs – 10 ms | aliases against the AVR ADC sample clock | jitters wildly | Sensor "twitches" — looks like flow chatter, harder for the bridge to debug. |
+| Mode | IR carrier | Demo behavior |
+| :--- | :--------- | :------------ |
+| **IDLE** | silent | Normal vent operation. |
+| **ATTACKING** | 38 kHz NEC frame `addr=0x00 cmd=0x42` retransmitted every ~150 ms | Arduino marks the temperature sensor as failed (publishes `temp_c=NaN`); vent firmware cuts the fan and raises the alarm. |
 
-The bridge detects the spoof by watching pressure's first-difference go to
-zero while temperature and fan PWM are still moving — a multivariate
-inconsistency the LLM patches with a virtual-pressure function.
+The bridge detects the failed-sensor state by watching the temperature
+field, then the LLM patches by switching to a synthesised value derived
+from pressure and fan PWM.
 
-> **Sub-GHz EMI alternative (not recommended for the live demo).** An
-> earlier draft of this doc proposed a CC1101 EMI attack. It is
-> theoretically valid but unreliable on stage: 10 mW into a 5 kΩ source
-> requires a tuned λ/4 antenna inches from the wire to shift the ADC by
-> useful counts. The GPIO injection above is deterministic and tells the
-> exact same threat story ("a tampered sensor is lying").
+> **Why IR instead of GPIO?** The first cut of the demo wired Flipper
+> PA7 → 1 kΩ → A0 to spoof the pressure ADC directly. That works but
+> requires a shared ground and a hard-wired attacker, which sells the
+> wrong story (an attacker with physical access to the wiring already
+> wins). IR makes the attack untethered and visually obvious — the
+> Flipper sits on the table, the target alarms when you point at it.
+> The downside is that the attack now disables the temperature channel
+> rather than the pressure channel; both produce the same headline
+> (vent thinks the patient circuit is broken), and the bridge's recovery
+> story is unchanged.
