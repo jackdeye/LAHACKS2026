@@ -1,5 +1,32 @@
 /* ── Landing page (frontpage overlay + device mesh) ──────────────────────── */
 
+/* Pre-rendered dashboard iframe.
+   - During landing: kept in the DOM and rendered (so WS / Three.js / Chart.js
+     are fully alive), but offscreen via translate so it can't be seen or clicked.
+     We avoid display:none and visibility:hidden so the browser doesn't throttle
+     rAF / WebGL inside the iframe.
+   - On show-dashboard: snapped on top, made interactive. */
+.dashboard-frame {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  border: 0;
+  margin: 0;
+  z-index: 5;
+  transform: translateX(100vw);
+  pointer-events: none;
+  background: var(--bg-0);
+}
+body.show-dashboard .dashboard-frame {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+/* When the dashboard is foregrounded, hide everything else so it owns the screen. */
+body.show-dashboard .mesh-view,
+body.show-dashboard .frontpage { display: none; }
+
+
 html, body { overflow: hidden; }
 
 body.landing {
@@ -175,15 +202,50 @@ body.revealed .mesh-legend { opacity: 1; }
   color: inherit;
   display: block;
   animation: card-float 7s ease-in-out infinite;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition:
+    width 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.25s ease,
+    border-color 0.18s ease;
 }
 .device-card[data-interactive="false"] {
-  pointer-events: none;
+  /* Cards still expand on hover; only the click action is disabled. */
+  cursor: default;
+}
+.device-card[data-interactive="false"]:not(:hover) {
   opacity: 0.85;
 }
 .device-card[data-interactive="true"]:hover {
   border-color: var(--accent);
   box-shadow: 0 2px 6px rgba(15,15,15,0.08), 0 12px 28px rgba(74,143,126,0.18);
+}
+.device-card:hover {
+  width: 300px;
+  z-index: 20;
+  animation-play-state: paused;
+}
+
+/* Hover-revealed circuit image */
+.device-image {
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  transition:
+    max-height 0.4s cubic-bezier(0.2, 0.8, 0.2, 1),
+    margin-top 0.4s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.25s ease 0.05s;
+}
+.device-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--bg-2);
+}
+.device-card:hover .device-image {
+  max-height: 280px;
+  margin-top: 10px;
+  opacity: 1;
 }
 .device-card[data-featured="true"] {
   border-color: var(--accent);

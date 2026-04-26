@@ -137,6 +137,70 @@ function makePot() {
     }
     return g;
 }
+// Generic 3-pin breakout PCB used as the base for the new sensor modules.
+function makeBreakoutPcb(width, depth, pcbColor, pinCount) {
+    const g = new THREE.Group();
+    const pcbMat = new THREE.MeshStandardMaterial({
+        color: pcbColor, roughness: 0.55, metalness: 0.1,
+    });
+    const pcb = new THREE.Mesh(new THREE.BoxGeometry(width, 0.18, depth), pcbMat);
+    pcb.position.y = 0.5;
+    g.add(pcb);
+    // pin header on the front edge (z = +depth/2)
+    const pinMat = new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.4, metalness: 0.85 });
+    const startX = -((pinCount - 1) * 0.3) / 2;
+    for (let i = 0; i < pinCount; i++) {
+        const pin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), pinMat);
+        pin.position.set(startX + i * 0.3, 0.25, depth / 2 - 0.1);
+        g.add(pin);
+    }
+    return { group: g, pcbMat };
+}
+// Pressure sensor — small green PCB with a metal port dome (BMP/MPX style).
+function makePressure() {
+    const { group: g, pcbMat } = makeBreakoutPcb(1.6, 1.2, 0x1f7a3a, 4);
+    const portMat = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, roughness: 0.35, metalness: 0.9 });
+    const chipMat = new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.7, metalness: 0.2 });
+    g.userData.glowMats = [pcbMat];
+    // metallic port dome
+    const port = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.55, 24), portMat);
+    port.position.set(-0.25, 0.875, 0);
+    g.add(port);
+    const portCap = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.18, 0.18, 24), portMat);
+    portCap.position.set(-0.25, 1.24, 0);
+    g.add(portCap);
+    // tiny intake nipple on top
+    const nipple = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.18, 12), portMat);
+    nipple.position.set(-0.25, 1.42, 0);
+    g.add(nipple);
+    // companion IC chip
+    const chip = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.12, 0.45), chipMat);
+    chip.position.set(0.45, 0.66, 0);
+    g.add(chip);
+    return g;
+}
+// Current sensor — red Hall-effect breakout (ACS712 style) with SOIC + screw terminals.
+function makeCurrent() {
+    const { group: g, pcbMat } = makeBreakoutPcb(1.8, 1.4, 0xa5252b, 4);
+    const chipMat = new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.7, metalness: 0.2 });
+    const terminalMat = new THREE.MeshStandardMaterial({ color: 0x4a90c2, roughness: 0.45, metalness: 0.6 });
+    const screwMat = new THREE.MeshStandardMaterial({ color: 0xd0d0d0, roughness: 0.3, metalness: 0.95 });
+    g.userData.glowMats = [pcbMat];
+    // SOIC chip
+    const chip = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.14, 0.4), chipMat);
+    chip.position.set(0.15, 0.67, 0);
+    g.add(chip);
+    // two screw terminals on the back edge for the current path
+    for (let i = 0; i < 2; i++) {
+        const term = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4), terminalMat);
+        term.position.set(-0.55 + i * 0.55, 0.77, -0.45);
+        g.add(term);
+        const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 12), screwMat);
+        screw.position.set(-0.55 + i * 0.55, 0.97, -0.45);
+        g.add(screw);
+    }
+    return g;
+}
 function makeMotorFan() {
     const g = new THREE.Group();
     // motor body (silver cylinder lying on its side along Z)
@@ -240,17 +304,24 @@ export async function initScene(canvas, onProgress) {
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.05;
     scene.add(ground);
+    // All model parts go inside this group so we can lift the entire device off
+    // the ground in one place. Without the lift, the motor's fan blades clip
+    // through the ground plane (blade radius ~2.2, motor sits at y≈0).
+    const MODEL_LIFT = 1.7;
+    const modelRoot = new THREE.Group();
+    modelRoot.position.y = MODEL_LIFT;
+    scene.add(modelRoot);
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 8;
     controls.maxDistance = 80;
     controls.maxPolarAngle = Math.PI * 0.49;
-    controls.target.set(0, 1, 0);
+    controls.target.set(0, 1 + MODEL_LIFT, 0);
     const parts = {};
     // ── Procedural parts ─────────────────────────────────────────────────────
     const breadboard = makeBreadboard();
-    scene.add(breadboard);
+    modelRoot.add(breadboard);
     parts.breadboard = breadboard;
     // Pulsing halo disc beneath an anomaly-able part — much more visible at
     // orbit distance than emissive on a small mesh.
@@ -273,32 +344,56 @@ export async function initScene(canvas, onProgress) {
     }
     const dht = makeDHT11();
     dht.position.set(-5.5, 0.85, 0.6);
-    scene.add(dht);
+    modelRoot.add(dht);
     parts.dht11 = dht;
     const dhtHalo = makeHalo();
     dhtHalo.position.set(-5.5, 0.89, 0.6);
-    scene.add(dhtHalo);
+    modelRoot.add(dhtHalo);
     dht.userData.halo = dhtHalo;
     const dhtLight = makeFailLight();
     dhtLight.position.set(-5.5, 2.0, 0.6);
-    scene.add(dhtLight);
+    modelRoot.add(dhtLight);
     dht.userData.failLight = dhtLight;
     const pot = makePot();
     pot.position.set(-1.2, 0.85, 0.6);
-    scene.add(pot);
+    modelRoot.add(pot);
     parts.pot = pot;
     const potHalo = makeHalo();
     potHalo.position.set(-1.2, 0.89, 0.6);
-    scene.add(potHalo);
+    modelRoot.add(potHalo);
     pot.userData.halo = potHalo;
     const potLight = makeFailLight();
     potLight.position.set(-1.2, 2.4, 0.6);
-    scene.add(potLight);
+    modelRoot.add(potLight);
     pot.userData.failLight = potLight;
+    const pressure = makePressure();
+    pressure.position.set(2.2, 0.85, 0.6);
+    modelRoot.add(pressure);
+    parts.pressure = pressure;
+    const pressureHalo = makeHalo();
+    pressureHalo.position.set(2.2, 0.89, 0.6);
+    modelRoot.add(pressureHalo);
+    pressure.userData.halo = pressureHalo;
+    const pressureLight = makeFailLight();
+    pressureLight.position.set(2.2, 2.4, 0.6);
+    modelRoot.add(pressureLight);
+    pressure.userData.failLight = pressureLight;
+    const current = makeCurrent();
+    current.position.set(5.0, 0.85, 0.6);
+    modelRoot.add(current);
+    parts.current = current;
+    const currentHalo = makeHalo();
+    currentHalo.position.set(5.0, 0.89, 0.6);
+    modelRoot.add(currentHalo);
+    current.userData.halo = currentHalo;
+    const currentLight = makeFailLight();
+    currentLight.position.set(5.0, 2.4, 0.6);
+    modelRoot.add(currentLight);
+    current.userData.failLight = currentLight;
     const { group: motorGroup, fan } = makeMotorFan();
     motorGroup.position.set(5.5, 0, 5.5);
     motorGroup.rotation.y = 0;
-    scene.add(motorGroup);
+    modelRoot.add(motorGroup);
     parts.motor = motorGroup;
     parts.fan = fan;
     // ── Load GLBs ────────────────────────────────────────────────────────────
@@ -318,10 +413,10 @@ export async function initScene(canvas, onProgress) {
         root.position.sub(center.multiplyScalar(s));
         root.rotation.set(...entry.rotation);
         root.position.add(new THREE.Vector3(...entry.position));
-        // sit on ground
+        // sit on ground (modelRoot's local y=0 plane)
         const post = new THREE.Box3().setFromObject(root);
         root.position.y -= post.min.y;
-        scene.add(root);
+        modelRoot.add(root);
         return root;
     }
     parts.uno = await loadGlb(GLBS.uno, "Arduino");
@@ -372,6 +467,14 @@ export async function initScene(canvas, onProgress) {
         { from: unoAnaPin(2), to: bbRow(-1.2, 1.0), color: BLUE, sag: 0.7 },
         { from: bbRow(-1.2, 2.4), to: bbRow(-1.2, 1.5), color: RED, sag: 0.05 },
         { from: bbRow(-1.2, -2.4), to: bbRow(-1.2, 0.5), color: BLACK, sag: 0.05 },
+        // ── Pressure sensor (A3 + power) ──
+        { from: unoAnaPin(3), to: bbRow(2.2, 1.0), color: GREEN, sag: 0.8 },
+        { from: bbRow(2.2, 2.4), to: bbRow(2.2, 1.5), color: RED, sag: 0.05 },
+        { from: bbRow(2.2, -2.4), to: bbRow(2.2, 0.5), color: BLACK, sag: 0.05 },
+        // ── Current sensor (A4 + power) ──
+        { from: unoAnaPin(4), to: bbRow(5.0, 1.0), color: PURPLE, sag: 0.85 },
+        { from: bbRow(5.0, 2.4), to: bbRow(5.0, 1.5), color: RED, sag: 0.05 },
+        { from: bbRow(5.0, -2.4), to: bbRow(5.0, 0.5), color: BLACK, sag: 0.05 },
         // ── LCD bus (LCD at z = -8) ──
         { from: bbRow(7.5, -2.6), to: lcdPin(1), color: BLACK, sag: 1.2 }, // VSS (Pin 1)
         { from: bbRow(7.5, 2.6), to: lcdPin(2), color: RED, sag: 1.2 }, // VDD (Pin 2)
@@ -388,18 +491,12 @@ export async function initScene(canvas, onProgress) {
         // ── Buzzer + LED ──
         { from: unoDigPin(8), to: bbRow(3.5, 0.5), color: ORANGE, sag: 0.5 },
         { from: unoDigPin(13), to: bbRow(2.0, 0.5), color: GREEN, sag: 0.5 },
-        // ── Flipper attack wire (PA7 → A0 / pot wiper) ──
-        { from: new THREE.Vector3(11.5, 1.5, 0.5), to: new THREE.Vector3(-1.2, 1.8, 0.6), color: 0xff3e5f, sag: 1.2 },
-        // Flipper GND tie
-        { from: new THREE.Vector3(11.5, 1.5, 1.5), to: bbRow(7.5, -2.6), color: BLACK, sag: 0.9 },
     ];
     const harness = new THREE.Group();
     for (const s of specs) {
         harness.add(makeWire(s.from, s.to, s.color, s.sag ?? 0.5));
     }
-    scene.add(harness);
-    // The very last wire is the Flipper attack line — keep a handle for tinting later.
-    parts.attackWire = harness.children[harness.children.length - 2];
+    modelRoot.add(harness);
     onProgress("LIVE");
     // ── Resize ──────────────────────────────────────────────────────────────
     function resize() {

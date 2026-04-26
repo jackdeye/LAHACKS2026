@@ -4,11 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AEGIS EDGE — Device Mesh</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="landing.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Render /dashboard.html in a hidden iframe at landing load so click→show is instant.
+       The iframe boots its WebSocket, Chart.js sparklines, and Three.js scene up front;
+       on click we just flip visibility and update the URL via history.pushState. -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
 </head>
 <body class="landing">
   <section class="mesh-view" aria-label="Monitored medical devices">
@@ -39,6 +46,16 @@
     <div id="meshNodes"></div>
   </section>
 
+  <!-- Pre-rendered dashboard. Begins loading immediately, renders fully behind the
+       landing layers, and is swapped to the foreground on Ventilator-card click. -->
+  <iframe
+    id="dashboardFrame"
+    class="dashboard-frame"
+    src="/dashboard.html"
+    title="Aegis Edge Dashboard"
+    aria-hidden="true"
+    tabindex="-1"></iframe>
+
   <div class="frontpage" id="frontpage">
     <div class="frontpage-inner">
       <div class="frontpage-mark">▲</div>
@@ -64,14 +81,14 @@
 
     // x/y are percentages (SVG viewBox is 0..100 with preserveAspectRatio=none)
     const DEVICES = [
-      { id: "ventilator",  name: "Ventilator",       group: "respiratory", status: "monitoring", state: "ok",   x: 50, y: 50, href: "/dashboard.html", featured: true,  meta: "ICU-04 · live telemetry" },
-      { id: "bipap",       name: "BiPAP Unit",       group: "respiratory", status: "online",     state: "ok",   x: 22, y: 30,                                          meta: "ICU-02 · 18 cmH₂O" },
-      { id: "ecg",         name: "ECG Monitor",      group: "cardiac",     status: "online",     state: "ok",   x: 78, y: 22,                                          meta: "Bay 7 · 72 bpm" },
-      { id: "defib",       name: "Defibrillator",    group: "cardiac",     status: "online",     state: "ok",   x: 88, y: 48,                                          meta: "Crash cart · armed" },
-      { id: "patient_mon", name: "Patient Monitor",  group: "cardiac",     status: "online",     state: "ok",   x: 70, y: 68,                                          meta: "Bay 7 · SpO₂ 98%" },
-      { id: "infusion",    name: "Infusion Pump",    group: "fluid",       status: "fault",      state: "fault",x: 30, y: 78,                                          meta: "Line 3 · occlusion" },
-      { id: "dialysis",    name: "Dialysis Machine", group: "fluid",       status: "online",     state: "ok",   x: 12, y: 62,                                          meta: "Station 2 · 250 mL/min" },
-      { id: "robot",       name: "Surgical Robot",   group: "surgical",    status: "warn",       state: "warn", x: 50, y: 12,                                          meta: "OR-1 · standby" },
+      { id: "ventilator",  name: "Ventilator",       group: "respiratory", status: "monitoring", state: "ok",   x: 50, y: 50, href: "/dashboard.html", featured: true,  meta: "ICU-04 · live telemetry", image: "/circuits/Ventilator.png" },
+      { id: "bipap",       name: "BiPAP Unit",       group: "respiratory", status: "online",     state: "ok",   x: 22, y: 30,                                          meta: "ICU-02 · 18 cmH₂O",        image: "/circuits/BiPAP.png" },
+      { id: "ecg",         name: "ECG Monitor",      group: "cardiac",     status: "online",     state: "ok",   x: 78, y: 22,                                          meta: "Bay 7 · 72 bpm",           image: "/circuits/ECG.png" },
+      { id: "defib",       name: "Defibrillator",    group: "cardiac",     status: "online",     state: "ok",   x: 88, y: 48,                                          meta: "Crash cart · armed",       image: "/circuits/Defibrilator.png" },
+      { id: "patient_mon", name: "Patient Monitor",  group: "cardiac",     status: "online",     state: "ok",   x: 70, y: 68,                                          meta: "Bay 7 · SpO₂ 98%",         image: "/circuits/PatientMonitor.png" },
+      { id: "infusion",    name: "Infusion Pump",    group: "fluid",       status: "fault",      state: "fault",x: 30, y: 78,                                          meta: "Line 3 · occlusion",       image: "/circuits/InfusionPump.png" },
+      { id: "dialysis",    name: "Dialysis Machine", group: "fluid",       status: "online",     state: "ok",   x: 12, y: 62,                                          meta: "Station 2 · 250 mL/min",   image: "/circuits/Dialysis.png" },
+      { id: "robot",       name: "Surgical Robot",   group: "surgical",    status: "warn",       state: "warn", x: 50, y: 12,                                          meta: "OR-1 · standby",           image: "/circuits/SurgicalRobot.png" },
     ];
 
     // Cross-group "telemetry backbone" edges so the mesh feels connected.
@@ -143,10 +160,20 @@
       el.dataset.interactive = String(interactive);
       el.dataset.status = STATUS_TO_STATE[d.status] || d.state || "ok";
       if (d.featured) el.dataset.featured = "true";
-      if (interactive) el.setAttribute("href", d.href);
+      if (interactive) {
+        el.setAttribute("href", d.href);
+        // Swap to the pre-rendered iframe instead of navigating — instant.
+        el.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          showDashboard();
+        });
+      }
 
       const groupLabel = d.group.charAt(0).toUpperCase() + d.group.slice(1);
       const statusState = STATUS_TO_STATE[d.status] || "ok";
+      const imageHtml = d.image
+        ? `<div class="device-image"><img src="${d.image}" alt="${d.name} circuit diagram" loading="lazy" decoding="async" /></div>`
+        : "";
       el.innerHTML = `
         <div class="device-head">
           <div>
@@ -156,6 +183,7 @@
           <span class="device-status" data-state="${statusState}">${STATUS_LABEL[d.status] || d.status.toUpperCase()}</span>
         </div>
         <div class="device-meta"><span class="dot"></span>${d.meta || ""}</div>
+        ${imageHtml}
       `;
       nodesEl.appendChild(el);
     }
@@ -164,6 +192,32 @@
     document.getElementById("getStarted").addEventListener("click", () => {
       document.body.classList.add("revealed");
     });
+
+    // Foreground the pre-rendered dashboard iframe and update the URL.
+    function showDashboard() {
+      document.body.classList.add("show-dashboard");
+      const frame = document.getElementById("dashboardFrame");
+      frame.removeAttribute("aria-hidden");
+      frame.removeAttribute("tabindex");
+      if (location.pathname !== "/dashboard.html") {
+        history.pushState({ view: "dashboard" }, "", "/dashboard.html");
+      }
+      // Move focus into the dashboard so keyboard users land there.
+      try { frame.contentWindow?.focus(); } catch (_) {}
+    }
+    function showLanding() {
+      document.body.classList.remove("show-dashboard");
+      const frame = document.getElementById("dashboardFrame");
+      frame.setAttribute("aria-hidden", "true");
+      frame.setAttribute("tabindex", "-1");
+    }
+    // Browser back/forward should toggle between the two views.
+    window.addEventListener("popstate", () => {
+      if (location.pathname === "/dashboard.html") showDashboard();
+      else showLanding();
+    });
+    // If the user deep-links to /dashboard.html, the static mount serves the real
+    // dashboard.html directly — they never hit this script. So no init needed here.
   </script>
 </body>
 </html>
