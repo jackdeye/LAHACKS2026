@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AEGIS EDGE — Autonomous Defense Console</title>
+  <title>AEGIS EDGE — Agent Mesh</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,115 +13,148 @@
 <body>
   <header class="topbar">
     <div class="brand">
+      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+        <span></span><span></span><span></span>
+      </button>
       <div class="brand-mark">▲</div>
       <div class="brand-text">
         <div class="brand-title">AEGIS EDGE</div>
-        <div class="brand-sub">Autonomous Defense Console · Air-Gapped SOC</div>
+        <div class="brand-sub">Autonomous Agent Mesh · Air-Gapped SOC</div>
       </div>
     </div>
     <div class="topbar-meta">
       <div class="meta-item"><span class="meta-label">SYSTEM</span><span class="meta-value" id="systemStatus">MONITORING</span></div>
-      <div class="meta-item"><span class="meta-label">ANOMALIES</span><span class="meta-value" id="anomalyCount">0</span></div>
+      <div class="meta-item"><span class="meta-label">INCIDENTS</span><span class="meta-value" id="anomalyCount">0</span></div>
       <div class="meta-item"><span class="meta-label">LINK</span><span class="meta-value link-status" id="linkStatus">CONNECTING</span></div>
       <div class="meta-item"><span class="meta-label">UTC</span><span class="meta-value" id="clock">--:--:--</span></div>
     </div>
   </header>
 
-  <main class="grid">
-    <section class="panel chart-panel" data-sensor="temperature">
-      <div class="panel-head">
-        <span class="panel-title">TEMPERATURE</span>
-        <span class="panel-unit">°C · PIN A0</span>
-        <span class="panel-tag" id="tempTag">NOMINAL</span>
-      </div>
-      <div class="reading" id="tempReading">--.- <span>°C</span></div>
-      <div class="chart-wrap"><canvas id="tempChart"></canvas></div>
-    </section>
-
-    <section class="panel chart-panel" data-sensor="pressure">
-      <div class="panel-head">
-        <span class="panel-title">PRESSURE</span>
-        <span class="panel-unit">hPa · PIN A1</span>
-        <span class="panel-tag" id="pressureTag">NOMINAL</span>
-      </div>
-      <div class="reading" id="pressureReading">---.- <span>hPa</span></div>
-      <div class="chart-wrap"><canvas id="pressureChart"></canvas></div>
-    </section>
-
-    <section class="panel chart-panel" data-sensor="current">
-      <div class="panel-head">
-        <span class="panel-title">MOTOR CURRENT</span>
-        <span class="panel-unit">A · PIN A2</span>
-        <span class="panel-tag" id="currentTag">NOMINAL</span>
-      </div>
-      <div class="reading" id="currentReading">-.--- <span>A</span></div>
-      <div class="chart-wrap"><canvas id="currentChart"></canvas></div>
-    </section>
-
-    <section class="panel status-panel">
-      <div class="panel-head">
-        <span class="panel-title">DEFENSE PIPELINE</span>
-      </div>
-      <div class="pipeline" id="pipeline">
-        <div class="step" data-step="monitoring"><span class="step-dot"></span><span class="step-label">Monitor</span></div>
-        <div class="step" data-step="anomaly_detected"><span class="step-dot"></span><span class="step-label">Detect</span></div>
-        <div class="step" data-step="llm_processing"><span class="step-dot"></span><span class="step-label">Reason</span></div>
-        <div class="step" data-step="flashing"><span class="step-dot"></span><span class="step-label">Flash</span></div>
-        <div class="step" data-step="patched"><span class="step-dot"></span><span class="step-label">Patched</span></div>
-      </div>
-      <div class="confidence">
-        <div class="conf-label">ANOMALY CONFIDENCE</div>
-        <div class="conf-bar"><div class="conf-fill" id="confFill"></div></div>
-        <div class="conf-value" id="confValue">0%</div>
-      </div>
-      <div class="stats" id="stats">
-        <div class="stat"><span class="stat-k">σ²(T)</span><span class="stat-v" id="statT">—</span></div>
-        <div class="stat"><span class="stat-k">σ²(P)</span><span class="stat-v" id="statP">—</span></div>
-        <div class="stat"><span class="stat-k">σ²(I)</span><span class="stat-v" id="statI">—</span></div>
-      </div>
-    </section>
-
-    <section class="panel log-panel">
-      <div class="panel-head">
-        <span class="panel-title">EVENT LOG</span>
-        <span class="panel-tag" id="logCount">0</span>
-      </div>
-      <div class="log" id="eventLog"></div>
-    </section>
-
-    <section class="panel controls-panel">
-      <div class="panel-head">
-        <span class="panel-title">DEMO CONTROLS</span>
-      </div>
-      <div class="controls">
-        <button class="btn btn-attack" id="btnAttack">⚡ TRIGGER EMI ATTACK</button>
-        <button class="btn btn-clear" id="btnClear">↻ CLEAR ATTACK</button>
-        <div class="controls-hint">
-          The attack flatlines the temperature ADC by holding it at a constant
-          "safe" voltage. The detector will catch the variance collapse, the
-          air-gapped LLM will synthesize a virtual-sensor patch, and the
-          firmware will be flashed in real time.
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">SENSORS</div>
+        <div class="sensor-card" data-sensor="temperature">
+          <div class="sensor-head">
+            <span class="sensor-name">TEMPERATURE</span>
+            <span class="sensor-tag" id="tempTag">NOMINAL</span>
+          </div>
+          <div class="sensor-reading" id="tempReading">--.- <span>°C</span></div>
+          <div class="sensor-spark"><canvas id="tempChart"></canvas></div>
+        </div>
+        <div class="sensor-card" data-sensor="pressure">
+          <div class="sensor-head">
+            <span class="sensor-name">PRESSURE</span>
+            <span class="sensor-tag" id="pressureTag">NOMINAL</span>
+          </div>
+          <div class="sensor-reading" id="pressureReading">---.- <span>hPa</span></div>
+          <div class="sensor-spark"><canvas id="pressureChart"></canvas></div>
+        </div>
+        <div class="sensor-card" data-sensor="current">
+          <div class="sensor-head">
+            <span class="sensor-name">MOTOR CURRENT</span>
+            <span class="sensor-tag" id="currentTag">NOMINAL</span>
+          </div>
+          <div class="sensor-reading" id="currentReading">-.--- <span>A</span></div>
+          <div class="sensor-spark"><canvas id="currentChart"></canvas></div>
         </div>
       </div>
-    </section>
 
-    <section class="panel code-panel">
-      <div class="panel-head">
-        <span class="panel-title">AI-GENERATED FIRMWARE PATCH</span>
-        <span class="panel-tag" id="codeTag">AWAITING PATCH</span>
+      <div class="sidebar-section">
+        <div class="sidebar-title">CONFIDENCE</div>
+        <div class="conf-mini">
+          <div class="conf-bar"><div class="conf-fill" id="confFill"></div></div>
+          <div class="conf-value" id="confValue">0%</div>
+        </div>
       </div>
-      <pre class="code"><code id="codeBlock">// Standing by.
-// On anomaly detection, the air-gapped intelligence layer
-// will synthesize a virtual-sensor firmware patch here.
-</code></pre>
-      <div class="code-meta" id="codeMeta">No patch generated yet.</div>
-    </section>
-  </main>
 
-  <footer class="footer">
-    <span>AEGIS EDGE v0.1 · zero-shot sensor virtualization · air-gapped frontier model</span>
-    <span id="modeBadge">SIMULATION</span>
-  </footer>
+      <div class="sidebar-section sidebar-foot">
+        <div class="sidebar-title">SIMULATION</div>
+        <button class="btn btn-attack" id="btnAttack">⚡ TRIGGER EMI ATTACK</button>
+        <button class="btn btn-clear" id="btnClear">↻ CLEAR ATTACK</button>
+        <div class="mode-badge" id="modeBadge">SIMULATION</div>
+      </div>
+    </aside>
+
+    <main class="canvas">
+      <div class="canvas-bg"></div>
+
+      <div class="agent-flow" id="agentFlow">
+        <div class="agent" data-agent="debugger" data-state="idle">
+          <div class="agent-pulse"></div>
+          <div class="agent-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>
+            </svg>
+          </div>
+          <div class="agent-name">Debugger</div>
+          <div class="agent-role">reads sensor logs</div>
+          <div class="agent-status">IDLE</div>
+        </div>
+
+        <div class="edge" data-edge="d-o"><span class="edge-flow"></span></div>
+
+        <div class="agent" data-agent="orchestrator" data-state="idle">
+          <div class="agent-pulse"></div>
+          <div class="agent-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <circle cx="12" cy="12" r="3"/>
+              <circle cx="12" cy="12" r="8"/>
+              <path d="M12 4v3M12 17v3M4 12h3M17 12h3"/>
+            </svg>
+          </div>
+          <div class="agent-name">Orchestrator</div>
+          <div class="agent-role">plans the response</div>
+          <div class="agent-status">IDLE</div>
+        </div>
+
+        <div class="edge" data-edge="o-c"><span class="edge-flow"></span></div>
+
+        <div class="agent" data-agent="coder" data-state="idle">
+          <div class="agent-pulse"></div>
+          <div class="agent-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/>
+            </svg>
+          </div>
+          <div class="agent-name">Coding Agent</div>
+          <div class="agent-role">synthesises patch</div>
+          <div class="agent-status">IDLE</div>
+        </div>
+
+        <div class="edge" data-edge="c-v"><span class="edge-flow"></span></div>
+
+        <div class="agent" data-agent="verifier" data-state="idle">
+          <div class="agent-pulse"></div>
+          <div class="agent-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="m4 12 5 5L20 6"/>
+            </svg>
+          </div>
+          <div class="agent-name">Verifier</div>
+          <div class="agent-role">compiles &amp; flashes</div>
+          <div class="agent-status">IDLE</div>
+        </div>
+      </div>
+
+      <section class="detail" id="detail">
+        <div class="detail-head">
+          <div class="detail-title">
+            <span class="detail-dot" id="detailDot"></span>
+            <span id="detailName">Awaiting incident</span>
+          </div>
+          <span class="detail-tag" id="detailTag">STANDBY</span>
+        </div>
+        <div class="detail-body" id="detailBody">
+          <div class="detail-placeholder">
+            The mesh is monitoring telemetry. When the Debugger flags an anomaly,
+            the Orchestrator dispatches the Coding Agent to synthesise a virtual-sensor
+            patch, and the Verifier compiles and flashes it.
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <script src="app.js"></script>
 </body>
