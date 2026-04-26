@@ -86,13 +86,13 @@ const els = {
     tempTag: byId("tempTag"),
     pressureTag: byId("pressureTag"),
     currentTag: byId("currentTag"),
-    confFill: byId("confFill"),
-    confValue: byId("confValue"),
     modeBadge: byId("modeBadge"),
     btnAttack: byId("btnAttack"),
     btnClear: byId("btnClear"),
+    btnHarden: byId("btnHarden"),
     sidebarToggle: byId("sidebarToggle"),
     layout: byId("layout"),
+    canvas: byId("canvas"),
     detailBody: byId("detailBody"),
     detailName: byId("detailName"),
     detailTag: byId("detailTag"),
@@ -104,6 +104,16 @@ const els = {
     graphRecenter: byId("graphRecenter"),
     graphEdges: document.getElementById("graphEdges"),
     graphNodes: document.getElementById("graphNodes"),
+    // Harden mode (red/blue team)
+    redPanel: byId("redPanel"),
+    bluePanel: byId("bluePanel"),
+    redTag: byId("redTag"),
+    blueTag: byId("blueTag"),
+    redBody: byId("redBody"),
+    blueBody: byId("blueBody"),
+    btnRedAction: byId("btnRedAction"),
+    btnBlueAction: byId("btnBlueAction"),
+    btnExitHarden: byId("btnExitHarden"),
 };
 // ── Sidebar collapse ──────────────────────────────────────────────────────
 els.sidebarToggle.addEventListener("click", () => {
@@ -444,7 +454,7 @@ function setLinkStatus(state) {
 }
 // ── Telemetry handling ────────────────────────────────────────────────────
 function handleTelemetry(msg) {
-    const { sensors, anomaly, anomaly_confidence, stats } = msg;
+    const { sensors, anomaly, stats } = msg;
     pushPoint("temperature", sensors.temperature);
     pushPoint("pressure", sensors.pressure);
     pushPoint("current", sensors.current);
@@ -486,9 +496,6 @@ function handleTelemetry(msg) {
         if (selectedAgent === "debugger")
             renderDetail("debugger");
     }
-    const conf = Math.round((anomaly_confidence || 0) * 100);
-    els.confFill.style.width = `${conf}%`;
-    els.confValue.textContent = `${conf}%`;
 }
 // ── Anomaly pipeline ──────────────────────────────────────────────────────
 function handleAnomaly(msg) {
@@ -643,6 +650,24 @@ function connect() {
             case "connected":
                 handleConnected(msg);
                 break;
+            case "harden_started":
+                handleHardenStarted();
+                break;
+            case "red_team_plan":
+                handleRedTeamPlan(msg);
+                break;
+            case "harden_attack_launched":
+                handleHardenAttackLaunched(msg);
+                break;
+            case "blue_team_patch":
+                handleBlueTeamPatch(msg);
+                break;
+            case "harden_patch_applied":
+                handleHardenPatchApplied(msg);
+                break;
+            case "harden_exited":
+                handleHardenExited();
+                break;
             case "error":
             case "ack": break;
         }
@@ -661,6 +686,367 @@ async function postJSON(path) {
     }
     catch { /* surfaced through link status */ }
 }
+let hardenState = "idle";
+// Step graph (mid-column lower half). Pre-rendered in dashboard.html; we just
+// flip data-state on the right <g data-step="…"> as the operator progresses,
+// and tint the connecting edges between completed/active hand-offs.
+const HARDEN_STEP_ORDER = ["recon", "attack", "analysis", "patch"];
+const HARDEN_STEP_TEAM = {
+    recon: "red", attack: "red", analysis: "blue", patch: "blue",
+};
+function stepNode(step) {
+    return document.querySelector(`#hardenStepsNodes .step-card[data-step="${step}"]`);
+}
+function setHardenStep(step, state) {
+    const n = stepNode(step);
+    if (n)
+        n.setAttribute("data-state", state);
+    refreshStepEdges();
+}
+function refreshStepEdges() {
+    document.querySelectorAll("#hardenStepsEdges .step-edge").forEach((edge) => {
+        const from = edge.dataset.from;
+        const to = edge.dataset.to;
+        const fromState = stepNode(from)?.getAttribute("data-state") ?? "idle";
+        const toState = stepNode(to)?.getAttribute("data-state") ?? "idle";
+        edge.removeAttribute("data-active");
+        edge.removeAttribute("data-upstream-done");
+        if (fromState === "done" && toState === "active") {
+            edge.setAttribute("data-active", "true");
+        }
+        else if (fromState === "done") {
+            edge.setAttribute("data-upstream-done", HARDEN_STEP_TEAM[from]);
+        }
+    });
+}
+function resetHardenSteps() {
+    for (const s of HARDEN_STEP_ORDER)
+        setHardenStep(s, "idle");
+}
+function sendWs(action, extra = {}) {
+    if (!ws || ws.readyState !== WebSocket.OPEN)
+        return;
+    ws.send(JSON.stringify({ action, ...extra }));
+}
+// Tiny markdown renderer covering the subset our prompts produce: H1–H3,
+// bullets, numbered lists, **bold**, *italic*, `code`, and paragraphs.
+// (`escapeHtml` is defined earlier in this file and reused here.)
+function renderInline(s) {
+    return s
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+        .replace(/(^|\W)_([^_\n]+)_(\W|$)/g, "$1<em>$2</em>$3");
+}
+function renderMd(src) {
+    // Walk the raw source line-by-line; fenced code blocks (```lang ... ```) are
+    // collected verbatim and emitted as <pre><code class="language-lang">…</code></pre>.
+    const lines = src.split("\n");
+    const out = [];
+    let listKind = null;
+    let para = [];
+    let inFence = false;
+    let fenceLang = "";
+    let fenceBuf = [];
+    const flushPara = () => {
+        if (para.length) {
+            out.push(`<p>${renderInline(escapeHtml(para.join(" ")))}</p>`);
+            para = [];
+        }
+    };
+    const closeList = () => {
+        if (listKind) {
+            out.push(`</${listKind}>`);
+            listKind = null;
+        }
+    };
+    const emitFence = (closed) => {
+        const lang = (fenceLang || "plaintext").replace(/[^a-z0-9_+-]/gi, "");
+        const body = escapeHtml(fenceBuf.join("\n"));
+        const cursorSuffix = closed ? "" : '<span class="md-cursor md-cursor-inline">▌</span>';
+        out.push(`<pre class="md-code language-${lang}"><code class="language-${lang}">${body}${cursorSuffix}</code></pre>`);
+    };
+    for (const raw of lines) {
+        const fenceOpen = raw.match(/^\s*```\s*([a-zA-Z0-9_+-]*)\s*$/);
+        if (inFence) {
+            if (fenceOpen) {
+                // closing fence
+                emitFence(true);
+                inFence = false;
+                fenceLang = "";
+                fenceBuf = [];
+            }
+            else {
+                fenceBuf.push(raw);
+            }
+            continue;
+        }
+        if (fenceOpen) {
+            flushPara();
+            closeList();
+            inFence = true;
+            fenceLang = fenceOpen[1];
+            fenceBuf = [];
+            continue;
+        }
+        const line = raw.trim();
+        if (!line) {
+            flushPara();
+            closeList();
+            continue;
+        }
+        let m;
+        if ((m = line.match(/^(#{1,3})\s+(.*)$/))) {
+            flushPara();
+            closeList();
+            const level = m[1].length;
+            out.push(`<h${level}>${renderInline(escapeHtml(m[2]))}</h${level}>`);
+            continue;
+        }
+        if ((m = line.match(/^[-*]\s+(.*)$/))) {
+            flushPara();
+            if (listKind !== "ul") {
+                closeList();
+                out.push("<ul>");
+                listKind = "ul";
+            }
+            out.push(`<li>${renderInline(escapeHtml(m[1]))}</li>`);
+            continue;
+        }
+        if ((m = line.match(/^\d+\.\s+(.*)$/))) {
+            flushPara();
+            if (listKind !== "ol") {
+                closeList();
+                out.push("<ol>");
+                listKind = "ol";
+            }
+            out.push(`<li>${renderInline(escapeHtml(m[1]))}</li>`);
+            continue;
+        }
+        closeList();
+        para.push(line);
+    }
+    if (inFence)
+        emitFence(false); // unterminated fence while typing
+    flushPara();
+    closeList();
+    return out.join("");
+}
+function typewriter(target, text, onDone) {
+    let i = 0;
+    let cancelled = false;
+    const finalize = () => {
+        target.innerHTML = renderMd(text);
+        if (typeof Prism !== "undefined" && Prism?.highlightAllUnder) {
+            try {
+                Prism.highlightAllUnder(target);
+            }
+            catch { /* no-op */ }
+        }
+        onDone?.();
+    };
+    const id = window.setInterval(() => {
+        if (cancelled) {
+            clearInterval(id);
+            return;
+        }
+        const pace = 3 + Math.floor(Math.random() * 4);
+        i = Math.min(text.length, i + pace);
+        if (i >= text.length) {
+            clearInterval(id);
+            finalize();
+            return;
+        }
+        // While typing, render markdown but skip Prism (cheap; ~1KB strings).
+        // Code blocks display as un-highlighted monospace until the closing fence
+        // arrives and finalize() runs Prism.
+        target.innerHTML = renderMd(text.slice(0, i)) + '<span class="md-cursor">▌</span>';
+    }, 22);
+    window.setTimeout(() => {
+        if (!cancelled && i < text.length) {
+            cancelled = true;
+            clearInterval(id);
+            finalize();
+        }
+    }, 50000);
+    return {
+        cancel() {
+            if (cancelled)
+                return;
+            cancelled = true;
+            clearInterval(id);
+            finalize();
+        },
+    };
+}
+let redTyper = null;
+let blueTyper = null;
+function setRedState(label, body) {
+    els.redTag.textContent = label;
+    els.redPanel.setAttribute("data-state", hardenState);
+    if (body !== undefined) {
+        redTyper?.cancel();
+        els.redBody.classList.add("md");
+        els.redBody.innerHTML = "";
+        redTyper = typewriter(els.redBody, body);
+    }
+}
+function setBlueState(label, body) {
+    els.blueTag.textContent = label;
+    els.bluePanel.setAttribute("data-state", hardenState);
+    if (body !== undefined) {
+        blueTyper?.cancel();
+        els.blueBody.classList.add("md");
+        els.blueBody.innerHTML = "";
+        blueTyper = typewriter(els.blueBody, body);
+    }
+}
+function enterHarden() {
+    if (hardenState !== "idle")
+        return;
+    hardenState = "armed";
+    els.layout.classList.add("harden");
+    els.canvas.setAttribute("data-harden", "true");
+    els.redPanel.setAttribute("data-open", "true");
+    els.bluePanel.setAttribute("data-open", "false");
+    els.btnHarden.disabled = true;
+    setRedState("READY");
+    els.btnRedAction.textContent = "Generate attack plan";
+    els.btnRedAction.disabled = false;
+    els.btnBlueAction.textContent = "Generate countermeasure";
+    els.btnBlueAction.disabled = true;
+    els.btnBlueAction.removeAttribute("data-state");
+    setBlueState("STANDBY");
+    resetHardenSteps();
+    closeIncidentPanel();
+    sendWs("start_harden");
+}
+function exitHardenLocal() {
+    hardenState = "idle";
+    els.layout.classList.remove("harden");
+    els.canvas.removeAttribute("data-harden");
+    els.redPanel.setAttribute("data-open", "false");
+    els.bluePanel.setAttribute("data-open", "false");
+    els.btnHarden.disabled = false;
+    if (sceneApi && activeAttackPart)
+        sceneApi.setSensorFailure(activeAttackPart, false);
+    activeAttackPart = null;
+    resetHardenSteps();
+    setSystemStatus("monitoring");
+}
+function handleHardenStarted() {
+    // Server confirmation; UI already entered harden in enterHarden().
+}
+function composeMd(prose, code, lang) {
+    const fence = code ? `\n\n\`\`\`${lang || "plaintext"}\n${code.trim()}\n\`\`\`\n` : "";
+    return `${prose.trim()}${fence}`;
+}
+function handleRedTeamPlan(msg) {
+    hardenState = "planned";
+    setHardenStep("recon", "done");
+    const header = `### Selected attack\n` +
+        `- **Target:** ${msg.target}\n` +
+        `- **Kind:** ${msg.kind}\n` +
+        `- **Magnitude:** ${msg.magnitude.toFixed(2)}\n` +
+        (msg.rationale ? `- **Rationale:** ${msg.rationale}\n` : "");
+    const body = composeMd(`${header}\n${msg.prose}`, msg.code, msg.lang || "python");
+    setRedState(msg.used_fallback ? "PLAN (FALLBACK)" : "PLAN READY", body);
+    els.btnRedAction.textContent = "Launch attack";
+    els.btnRedAction.disabled = false;
+}
+// Maps server-side sensor names ("temperature" / "pressure" / "current") to
+// the 3D scene part keys used by SceneApi.setSensorFailure(...).
+const SENSOR_TO_PART = {
+    temperature: "dht11",
+    pressure: "pot",
+    current: "current",
+};
+let activeAttackPart = null;
+function handleHardenAttackLaunched(msg) {
+    hardenState = "attacking";
+    setHardenStep("attack", "done");
+    els.redPanel.setAttribute("data-state", "attacking");
+    setRedState(`ATTACK LIVE · ${(msg.kind || "flatline").toUpperCase()}`);
+    els.btnRedAction.textContent = "Attack engaged";
+    els.btnRedAction.disabled = true;
+    els.bluePanel.setAttribute("data-open", "true");
+    const sensorName = msg.target || "temperature";
+    setBlueState("READY", `Telemetry confirms the **${msg.kind || "flatline"}** signature on **${sensorName}**: ` +
+        `variance pattern shifted while sibling channels remain active. ` +
+        `Engage the local model to fit a virtual sensor and draft the patch.`);
+    els.btnBlueAction.disabled = false;
+    // Highlight the actual targeted sensor on the 3D twin.
+    activeAttackPart = SENSOR_TO_PART[sensorName] || "dht11";
+    if (sceneApi)
+        sceneApi.setSensorFailure(activeAttackPart, true);
+    setSystemStatus("anomaly_detected");
+}
+function handleBlueTeamPatch(msg) {
+    hardenState = "patching";
+    setHardenStep("analysis", "done");
+    const fitLine = msg.basis && msg.coefficients && msg.intercept != null
+        ? `### Fitted virtual sensor\n` +
+            `- **Substituting:** ${msg.target}\n` +
+            `- **Predictors:** ${msg.basis.join(", ")}\n` +
+            `- **β₀ (intercept):** ${msg.intercept.toFixed(5)}\n` +
+            msg.basis.map((b, i) => `- **β${i + 1} (${b}):** ${msg.coefficients[i].toFixed(5)}`).join("\n") +
+            (msg.r2 != null ? `\n- **R²:** ${msg.r2.toFixed(3)}` : "") +
+            "\n"
+        : "";
+    const body = composeMd(`${fitLine}\n${msg.prose}`, msg.code, msg.lang || "cpp");
+    setBlueState(msg.used_fallback ? "PATCH (FALLBACK)" : "PATCH READY", body);
+    els.btnBlueAction.textContent = "Apply patch";
+    els.btnBlueAction.disabled = false;
+}
+function handleHardenPatchApplied(_msg) {
+    hardenState = "patched";
+    setHardenStep("patch", "done");
+    if (sceneApi && activeAttackPart)
+        sceneApi.setSensorFailure(activeAttackPart, false);
+    activeAttackPart = null;
+    setBlueState("PATCHED");
+    els.btnBlueAction.textContent = "Patch active";
+    els.btnBlueAction.disabled = true;
+    els.btnBlueAction.setAttribute("data-state", "patched");
+    setSystemStatus("patched");
+    setRedState("NEUTRALIZED");
+    els.redPanel.setAttribute("data-state", "patched");
+}
+function handleHardenExited() {
+    exitHardenLocal();
+}
+els.btnHarden.addEventListener("click", enterHarden);
+els.btnRedAction.addEventListener("click", () => {
+    if (hardenState === "armed") {
+        hardenState = "planning";
+        setHardenStep("recon", "active");
+        setRedState("PLANNING…");
+        els.btnRedAction.disabled = true;
+        sendWs("request_red_plan");
+    }
+    else if (hardenState === "planned") {
+        setHardenStep("attack", "active");
+        sendWs("launch_attack");
+    }
+});
+els.btnBlueAction.addEventListener("click", () => {
+    if (hardenState === "attacking") {
+        hardenState = "planning"; // blue planning, not red — but reuse tag styling via state attr
+        setHardenStep("analysis", "active");
+        els.bluePanel.setAttribute("data-state", "planning");
+        setBlueState("PLANNING…");
+        els.btnBlueAction.disabled = true;
+        sendWs("request_blue_patch");
+    }
+    else if (hardenState === "patching") {
+        setHardenStep("patch", "active");
+        sendWs("apply_patch");
+    }
+});
+els.btnExitHarden.addEventListener("click", () => {
+    sendWs("exit_harden");
+    exitHardenLocal();
+});
 els.btnAttack.addEventListener("click", () => { void postJSON("/api/simulate/attack"); });
 els.btnClear.addEventListener("click", () => {
     // Local UI reset — the /clear endpoint doesn't broadcast a status change,

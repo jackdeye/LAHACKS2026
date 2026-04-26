@@ -9,6 +9,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-cpp.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script type="importmap">
   {
@@ -84,23 +90,32 @@
         </div>
       </div>
 
-      <div class="sidebar-section">
-        <div class="sidebar-title">CONFIDENCE</div>
-        <div class="conf-mini">
-          <div class="conf-bar"><div class="conf-fill" id="confFill"></div></div>
-          <div class="conf-value" id="confValue">0%</div>
-        </div>
-      </div>
-
       <div class="sidebar-section sidebar-foot">
         <div class="sidebar-title">SIMULATION</div>
         <button class="btn btn-attack" id="btnAttack">⚡ TRIGGER EMI ATTACK</button>
         <button class="btn btn-clear" id="btnClear">↻ CLEAR ATTACK</button>
+        <button class="btn btn-harden" id="btnHarden">🛡 HARDEN</button>
         <div class="mode-badge" id="modeBadge">SIMULATION</div>
       </div>
     </aside>
 
-    <main class="canvas">
+    <main class="canvas" id="canvas">
+      <aside class="team-panel team-blue" id="bluePanel" data-open="false">
+        <div class="team-head">
+          <div class="team-title">
+            <span class="team-dot"></span>
+            <span>Blue Team · Defense</span>
+          </div>
+          <span class="team-tag" id="blueTag">STANDBY</span>
+        </div>
+        <div class="team-body" id="blueBody">
+          <div class="team-placeholder">Awaiting attack — blue team will activate once the red team launches.</div>
+        </div>
+        <div class="team-foot">
+          <button class="btn btn-blue" id="btnBlueAction" disabled>Generate countermeasure</button>
+        </div>
+      </aside>
+
       <section class="twin-panel" id="twinPanel">
         <div class="twin-head">
           <button class="twin-collapse" id="twinCollapse" aria-label="Toggle digital twin">
@@ -112,6 +127,50 @@
         </div>
         <div class="twin-canvas-wrap">
           <canvas id="twinCanvas"></canvas>
+        </div>
+      </section>
+
+      <section class="harden-steps" id="hardenSteps" aria-hidden="true">
+        <div class="harden-steps-head">
+          <span class="harden-steps-title">HARDEN PIPELINE</span>
+          <span class="harden-steps-sub">red team → blue team</span>
+        </div>
+        <div class="harden-steps-canvas">
+          <svg class="harden-steps-edges" id="hardenStepsEdges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <line class="step-edge" data-from="recon"    data-to="attack"   x1="14" y1="35" x2="38" y2="70" />
+            <line class="step-edge" data-from="attack"   data-to="analysis" x1="38" y1="70" x2="62" y2="35" />
+            <line class="step-edge" data-from="analysis" data-to="patch"    x1="62" y1="35" x2="86" y2="70" />
+          </svg>
+          <div class="step-cards" id="hardenStepsNodes">
+            <div class="step-card" data-step="recon"    data-team="red"  data-state="idle" style="left: 14%; top: 35%;">
+              <div class="step-card-head">
+                <span class="step-card-name">Recon</span>
+                <span class="step-card-light" aria-hidden="true"></span>
+              </div>
+              <div class="step-card-meta">attack plan</div>
+            </div>
+            <div class="step-card" data-step="attack"   data-team="red"  data-state="idle" style="left: 38%; top: 70%;">
+              <div class="step-card-head">
+                <span class="step-card-name">Attack</span>
+                <span class="step-card-light" aria-hidden="true"></span>
+              </div>
+              <div class="step-card-meta">spoof live</div>
+            </div>
+            <div class="step-card" data-step="analysis" data-team="blue" data-state="idle" style="left: 62%; top: 35%;">
+              <div class="step-card-head">
+                <span class="step-card-name">Analysis</span>
+                <span class="step-card-light" aria-hidden="true"></span>
+              </div>
+              <div class="step-card-meta">fit + draft</div>
+            </div>
+            <div class="step-card" data-step="patch"    data-team="blue" data-state="idle" style="left: 86%; top: 70%;">
+              <div class="step-card-head">
+                <span class="step-card-name">Patch</span>
+                <span class="step-card-light" aria-hidden="true"></span>
+              </div>
+              <div class="step-card-meta">virtual sensor</div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -145,6 +204,23 @@
           <div class="detail-body" id="detailBody">
             <div class="detail-placeholder">Click a spawned agent to inspect its output.</div>
           </div>
+        </div>
+      </aside>
+
+      <aside class="team-panel team-red" id="redPanel" data-open="false">
+        <div class="team-head">
+          <div class="team-title">
+            <span class="team-dot"></span>
+            <span>Red Team · Offense</span>
+          </div>
+          <span class="team-tag" id="redTag">IDLE</span>
+        </div>
+        <div class="team-body" id="redBody">
+          <div class="team-placeholder">Press <strong>Generate attack plan</strong> to query the local model for an offensive plan against the temperature sensor.</div>
+        </div>
+        <div class="team-foot">
+          <button class="btn btn-red" id="btnRedAction">Generate attack plan</button>
+          <button class="btn btn-ghost" id="btnExitHarden">Exit Harden</button>
         </div>
       </aside>
     </main>
